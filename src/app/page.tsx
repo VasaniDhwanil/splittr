@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Receipt, Users, Calculator, Share2, ChevronRight, Loader2 } from 'lucide-react';
 import { formatCurrency } from '@/lib/calculations';
-import { Bill } from '@/types';
+import { Bill, Participant } from '@/types';
 
 interface StoredBill {
   id: string;
@@ -17,9 +17,13 @@ interface StoredBill {
   role: 'creator' | 'participant';
 }
 
+interface BillWithParticipants extends Bill {
+  participants?: Participant[];
+}
+
 export default function Home() {
   const [myBills, setMyBills] = useState<StoredBill[]>([]);
-  const [billDetails, setBillDetails] = useState<Record<string, Bill>>({});
+  const [billDetails, setBillDetails] = useState<Record<string, BillWithParticipants>>({});
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
