@@ -41,10 +41,6 @@ export default function BillPage() {
   const [splits, setSplits] = useState<ParticipantSplit[]>([]);
   const [copied, setCopied] = useState(false);
 
-  // For split dialog
-  const [splitDialogItem, setSplitDialogItem] = useState<BillItem | null>(null);
-  const [showSplitDialog, setShowSplitDialog] = useState(false);
-
   const fetchBill = useCallback(async () => {
     try {
       const response = await fetch(`/api/bills/${billId}`);
@@ -179,7 +175,7 @@ export default function BillPage() {
     }
   };
 
-  const handleItemClick = (item: BillItem) => {
+  const handleToggleClaim = async (item: BillItem) => {
     if (!currentParticipant) {
       setShowJoinDialog(true);
       return;
@@ -189,53 +185,30 @@ export default function BillPage() {
       (c) => c.participant_id === currentParticipant.id && c.item_id === item.id
     );
 
-    if (existingClaim) {
-      // If already claimed, unclaim it
-      handleUnclaimItem(item.id);
-    } else {
-      // Show split dialog
-      setSplitDialogItem(item);
-      setShowSplitDialog(true);
-    }
-  };
-
-  const handleClaimItem = async (itemId: string, share: number) => {
-    if (!currentParticipant) return;
-
     try {
-      await fetch('/api/claims', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          participant_id: currentParticipant.id,
-          item_id: itemId,
-          share,
-        }),
-      });
-
-      const shareText = share === 1 ? 'full item' : `${Math.round(share * 100)}%`;
-      toast.success(`Claimed ${shareText}`);
-      setShowSplitDialog(false);
-      setSplitDialogItem(null);
+      if (existingClaim) {
+        // Unclaim
+        await fetch(`/api/claims?participant_id=${currentParticipant.id}&item_id=${item.id}`, {
+          method: 'DELETE',
+        });
+        toast.success('Removed from split');
+      } else {
+        // Claim with share=1, auto-splits with others
+        await fetch('/api/claims', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            participant_id: currentParticipant.id,
+            item_id: item.id,
+            share: 1,
+          }),
+        });
+        toast.success('Added to split');
+      }
       await fetchBill();
     } catch (error) {
-      console.error('Error claiming item:', error);
-      toast.error('Failed to claim item');
-    }
-  };
-
-  const handleUnclaimItem = async (itemId: string) => {
-    if (!currentParticipant) return;
-
-    try {
-      await fetch(`/api/claims?participant_id=${currentParticipant.id}&item_id=${itemId}`, {
-        method: 'DELETE',
-      });
-      toast.success('Item unclaimed');
-      await fetchBill();
-    } catch (error) {
-      console.error('Error unclaiming item:', error);
-      toast.error('Failed to unclaim item');
+      console.error('Error toggling claim:', error);
+      toast.error('Failed to update');
     }
   };
 
@@ -264,8 +237,11 @@ export default function BillPage() {
     }
   };
 
-  const getItemClaims = (itemId: string) => {
-    return claims.filter((c) => c.item_id === itemId);
+  const getItemClaimers = (itemId: string) => {
+    const itemClaims = claims.filter((c) => c.item_id === itemId);
+    return itemClaims
+      .map((c) => participants.find((p) => p.id === c.participant_id))
+      .filter(Boolean) as Participant[];
   };
 
   const isItemClaimedByMe = (itemId: string) => {
@@ -273,23 +249,6 @@ export default function BillPage() {
     return claims.some(
       (c) => c.participant_id === currentParticipant.id && c.item_id === itemId
     );
-  };
-
-  const getMyClaimShare = (itemId: string): number | null => {
-    if (!currentParticipant) return null;
-    const claim = claims.find(
-      (c) => c.participant_id === currentParticipant.id && c.item_id === itemId
-    );
-    return claim ? claim.share : null;
-  };
-
-  const formatShareLabel = (share: number): string => {
-    if (share === 1) return 'Full';
-    if (share === 0.5) return '1/2';
-    if (share >= 0.33 && share <= 0.34) return '1/3';
-    if (share === 0.25) return '1/4';
-    if (share === 0.2) return '1/5';
-    return `${Math.round(share * 100)}%`;
   };
 
   if (isLoading) {
@@ -417,21 +376,15 @@ export default function BillPage() {
             <CardTitle className="text-lg">Items</CardTitle>
             <CardDescription>
               {currentParticipant
-                ? 'Tap items you ordered. Tap again to unclaim.'
+                ? 'Tap items you had. Others who tap will auto-split with you.'
                 : 'Join the bill to claim items.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {items.map((item) => {
-              const itemClaims = getItemClaims(item.id);
+              const claimers = getItemClaimers(item.id);
               const claimedByMe = isItemClaimedByMe(item.id);
-              const myShare = getMyClaimShare(item.id);
-              const claimersWithShares = itemClaims
-                .map((c) => {
-                  const p = participants.find((p) => p.id === c.participant_id);
-                  return p ? { name: p.name, share: c.share, isMe: p.id === currentParticipant?.id } : null;
-                })
-                .filter(Boolean) as { name: string; share: number; isMe: boolean }[];
+              const splitCount = claimers.length;
 
               return (
                 <div
@@ -441,7 +394,7 @@ export default function BillPage() {
                       ? 'bg-primary/10 border-primary'
                       : 'hover:bg-muted'
                   }`}
-                  onClick={() => handleItemClick(item)}
+                  onClick={() => handleToggleClaim(item)}
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
@@ -449,13 +402,22 @@ export default function BillPage() {
                         {item.quantity > 1 && `${item.quantity}x `}
                         {item.name}
                       </div>
-                      {claimersWithShares.length > 0 && (
-                        <div className="text-sm text-muted-foreground mt-1 flex flex-wrap gap-1">
-                          {claimersWithShares.map((c, i) => (
-                            <Badge key={i} variant={c.isMe ? 'default' : 'secondary'} className="text-xs">
-                              {c.name}: {formatShareLabel(c.share)}
+                      {claimers.length > 0 && (
+                        <div className="text-sm text-muted-foreground mt-1">
+                          {claimers.map((p, i) => (
+                            <Badge
+                              key={p.id}
+                              variant={p.id === currentParticipant?.id ? 'default' : 'secondary'}
+                              className="text-xs mr-1 mb-1"
+                            >
+                              {p.name}
                             </Badge>
                           ))}
+                          {splitCount > 1 && (
+                            <span className="text-xs ml-1">
+                              (split {splitCount} ways)
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -463,10 +425,10 @@ export default function BillPage() {
                       <div className="font-medium">
                         {formatCurrency(item.price * item.quantity)}
                       </div>
-                      {claimedByMe && myShare && (
+                      {claimedByMe && (
                         <Badge variant="outline" className="mt-1">
                           <Check className="h-3 w-3 mr-1" />
-                          {formatShareLabel(myShare)}
+                          {splitCount > 1 ? `1/${splitCount}` : 'You'}
                         </Badge>
                       )}
                     </div>
@@ -564,85 +526,6 @@ export default function BillPage() {
           </div>
         )}
 
-        {/* Split Dialog */}
-        <Dialog open={showSplitDialog} onOpenChange={setShowSplitDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Claim Item</DialogTitle>
-              <DialogDescription>
-                {splitDialogItem && (
-                  <>
-                    <span className="font-medium text-foreground">{splitDialogItem.name}</span>
-                    <span className="text-muted-foreground"> - {formatCurrency(splitDialogItem.price * splitDialogItem.quantity)}</span>
-                  </>
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3 pt-4">
-              <p className="text-sm text-muted-foreground">How are you splitting this item?</p>
-              <div className="grid grid-cols-2 gap-3">
-                <Button
-                  variant="outline"
-                  className="h-16 flex flex-col"
-                  onClick={() => splitDialogItem && handleClaimItem(splitDialogItem.id, 1)}
-                >
-                  <span className="text-lg font-semibold">Just Me</span>
-                  <span className="text-xs text-muted-foreground">100%</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-16 flex flex-col"
-                  onClick={() => splitDialogItem && handleClaimItem(splitDialogItem.id, 0.5)}
-                >
-                  <span className="text-lg font-semibold">Split 2</span>
-                  <span className="text-xs text-muted-foreground">50% each</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-16 flex flex-col"
-                  onClick={() => splitDialogItem && handleClaimItem(splitDialogItem.id, 0.33)}
-                >
-                  <span className="text-lg font-semibold">Split 3</span>
-                  <span className="text-xs text-muted-foreground">33% each</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-16 flex flex-col"
-                  onClick={() => splitDialogItem && handleClaimItem(splitDialogItem.id, 0.25)}
-                >
-                  <span className="text-lg font-semibold">Split 4</span>
-                  <span className="text-xs text-muted-foreground">25% each</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-16 flex flex-col"
-                  onClick={() => splitDialogItem && handleClaimItem(splitDialogItem.id, 0.2)}
-                >
-                  <span className="text-lg font-semibold">Split 5</span>
-                  <span className="text-xs text-muted-foreground">20% each</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-16 flex flex-col"
-                  onClick={() => splitDialogItem && handleClaimItem(splitDialogItem.id, 0.167)}
-                >
-                  <span className="text-lg font-semibold">Split 6</span>
-                  <span className="text-xs text-muted-foreground">~17% each</span>
-                </Button>
-              </div>
-              <Button
-                variant="ghost"
-                className="w-full"
-                onClick={() => {
-                  setShowSplitDialog(false);
-                  setSplitDialogItem(null);
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </div>
     </main>
   );

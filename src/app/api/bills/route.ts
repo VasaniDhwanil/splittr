@@ -82,13 +82,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Create the creator as a participant
-    const { error: participantError } = await supabase
+    const { data: creator, error: participantError } = await supabase
       .from('participants')
       .insert({
         bill_id: bill.id,
         name: creator_name,
         is_creator: true,
-      });
+      })
+      .select()
+      .single();
 
     if (participantError) {
       console.error('Error creating participant:', participantError);
@@ -97,6 +99,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       id: bill.id,
       short_code: bill.short_code,
+      creator_participant_id: creator?.id,
     });
   } catch (error) {
     console.error('Error in bills POST:', error);

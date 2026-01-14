@@ -123,7 +123,7 @@ export default function CreatePage() {
         throw new Error('Failed to create bill');
       }
 
-      const { id, short_code } = await response.json();
+      const { id, short_code, creator_participant_id } = await response.json();
 
       // Save to localStorage for "My Bills"
       const storedBills = JSON.parse(localStorage.getItem('splittr-my-bills') || '[]');
@@ -135,6 +135,11 @@ export default function CreatePage() {
         role: 'creator',
       });
       localStorage.setItem('splittr-my-bills', JSON.stringify(storedBills.slice(0, 20))); // Keep last 20
+
+      // Save creator's participant ID so they're recognized on the bill page
+      if (creator_participant_id) {
+        localStorage.setItem(`splittr-participant-${id}`, creator_participant_id);
+      }
 
       toast.success('Bill created!');
       router.push(`/bill/${id}`);
