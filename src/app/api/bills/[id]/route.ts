@@ -73,9 +73,9 @@ export async function PATCH(
     const supabase = await createClient();
     const body = await request.json();
 
-    const { tip_percent } = body;
+    const { tip_percent, status } = body;
 
-    // Get current bill to recalculate tip
+    // Get current bill
     const { data: bill } = await supabase
       .from('bills')
       .select('subtotal, tax')
@@ -89,11 +89,28 @@ export async function PATCH(
       );
     }
 
-    const tip_amount = (bill.subtotal + bill.tax) * (tip_percent / 100);
+    // Build update object
+    const updateData: { tip_percent?: number; tip_amount?: number; status?: string } = {};
+
+    if (tip_percent !== undefined) {
+      updateData.tip_percent = tip_percent;
+      updateData.tip_amount = (bill.subtotal + bill.tax) * (tip_percent / 100);
+    }
+
+    if (status !== undefined) {
+      // Validate status value
+      if (!['draft', 'active', 'settled'].includes(status)) {
+        return NextResponse.json(
+          { error: 'Invalid status value' },
+          { status: 400 }
+        );
+      }
+      updateData.status = status;
+    }
 
     const { data: updatedBill, error } = await supabase
       .from('bills')
-      .update({ tip_percent, tip_amount })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();

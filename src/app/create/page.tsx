@@ -154,7 +154,7 @@ export default function CreatePage() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-background to-muted py-8">
       <div className="container mx-auto px-4 max-w-2xl">
-        <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-foreground mb-6">
+        <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-foreground mb-6 transition-smooth">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Home
         </Link>
@@ -163,7 +163,7 @@ export default function CreatePage() {
 
         {/* Step 1: Upload */}
         {step === 'upload' && (
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Scan Your Receipt</CardTitle>
               <CardDescription>
@@ -183,7 +183,7 @@ export default function CreatePage() {
               <div className="flex flex-col sm:flex-row gap-4">
                 <Button
                   size="lg"
-                  className="flex-1"
+                  className="flex-1 transition-smooth hover:scale-105"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isScanning}
                 >
@@ -202,7 +202,7 @@ export default function CreatePage() {
                 <Button
                   size="lg"
                   variant="outline"
-                  className="flex-1"
+                  className="flex-1 transition-smooth hover:scale-105"
                   onClick={() => {
                     if (fileInputRef.current) {
                       fileInputRef.current.removeAttribute('capture');
@@ -231,7 +231,7 @@ export default function CreatePage() {
 
         {/* Step 2: Review Items */}
         {step === 'review' && (
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Review Items</CardTitle>
               <CardDescription>
@@ -239,8 +239,18 @@ export default function CreatePage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Column headers */}
+              {items.length > 0 && (
+                <div className="flex gap-2 items-center text-xs text-muted-foreground">
+                  <div className="flex-1">Item name</div>
+                  <div className="w-16 text-center">Qty</div>
+                  <div className="w-24 text-center">Each $</div>
+                  <div className="w-20 text-right">Total</div>
+                  <div className="w-9"></div>
+                </div>
+              )}
               {items.map((item, index) => (
-                <div key={index} className="flex gap-2 items-start">
+                <div key={index} className="flex gap-2 items-center">
                   <div className="flex-1">
                     <Input
                       placeholder="Item name"
@@ -248,23 +258,27 @@ export default function CreatePage() {
                       onChange={(e) => handleUpdateItem(index, 'name', e.target.value)}
                     />
                   </div>
-                  <div className="w-20">
+                  <div className="w-16">
                     <Input
                       type="number"
                       placeholder="Qty"
                       min="1"
                       value={item.quantity}
                       onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
+                      className="text-center"
                     />
                   </div>
                   <div className="w-24">
                     <Input
                       type="number"
                       step="0.01"
-                      placeholder="Price"
+                      placeholder="0.00"
                       value={item.price || ''}
                       onChange={(e) => handleUpdateItem(index, 'price', e.target.value)}
                     />
+                  </div>
+                  <div className="w-20 text-right text-sm font-medium">
+                    {formatCurrency(item.price * item.quantity)}
                   </div>
                   <Button
                     variant="ghost"
@@ -340,7 +354,7 @@ export default function CreatePage() {
 
         {/* Step 3: Bill Details */}
         {step === 'details' && (
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Bill Details</CardTitle>
               <CardDescription>
@@ -397,14 +411,14 @@ export default function CreatePage() {
                 <Button variant="outline" onClick={() => setStep('review')}>
                   Back
                 </Button>
-                <Button className="flex-1" onClick={handleCreateBill} disabled={isCreating}>
+                <Button className="flex-1 transition-smooth hover:scale-105" onClick={handleCreateBill} disabled={isCreating}>
                   {isCreating ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Creating...
                     </>
                   ) : (
-                    'Create Bill'
+                    "Let's Split!"
                   )}
                 </Button>
               </div>

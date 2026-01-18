@@ -36,14 +36,18 @@ export async function scanReceipt(imageBase64: string, mimeType: string): Promis
 
 Rules:
 1. Extract every line item with its name, price, and quantity
-2. If quantity is not shown, assume 1
-3. Prices should be numbers (not strings)
-4. If you can't determine subtotal/tax/total, calculate them:
-   - subtotal = sum of (price * quantity) for all items
+2. IMPORTANT: "price" must be the UNIT PRICE (price for ONE item), not the line total
+   - If receipt shows "2 Beers $16.00", the unit price is $8.00, so return: { "name": "Beer", "price": 8.00, "quantity": 2 }
+   - If receipt shows "Beer $8.00" with quantity 2, return: { "name": "Beer", "price": 8.00, "quantity": 2 }
+   - The formula is: line_total = price × quantity
+3. If quantity is not shown, assume 1 (and price = line total)
+4. Prices should be numbers (not strings)
+5. If you can't determine subtotal/tax/total, calculate them:
+   - subtotal = sum of (price × quantity) for all items
    - If tax is not shown, set it to 0
    - total = subtotal + tax
-5. Clean up item names (remove codes, abbreviations if possible)
-6. Return ONLY the JSON object, no other text`,
+6. Clean up item names (remove codes, abbreviations if possible)
+7. Return ONLY the JSON object, no other text`,
           },
         ],
       },

@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Users } from 'lucide-react';
 
 export default function JoinPage() {
   const router = useRouter();
@@ -31,9 +31,9 @@ export default function JoinPage() {
 
       if (!response.ok) {
         if (response.status === 404) {
-          toast.error('Bill not found. Please check the code and try again.');
+          toast.error("Hmm, can't find that bill. Double-check the code?");
         } else {
-          toast.error('Failed to find bill. Please try again.');
+          toast.error('Something went wrong. Please try again.');
         }
         return;
       }
@@ -42,7 +42,7 @@ export default function JoinPage() {
       router.push(`/bill/${bill.id}`);
     } catch (error) {
       console.error('Error finding bill:', error);
-      toast.error('Failed to find bill. Please try again.');
+      toast.error('Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -51,40 +51,43 @@ export default function JoinPage() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-background to-muted py-8">
       <div className="container mx-auto px-4 max-w-md">
-        <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-foreground mb-6">
+        <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-foreground mb-6 transition-smooth">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Home
         </Link>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Join a Bill</CardTitle>
+        <Card className="shadow-sm">
+          <CardHeader className="text-center">
+            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <Users className="h-8 w-8 text-primary" />
+            </div>
+            <CardTitle className="text-2xl">Join a Bill</CardTitle>
             <CardDescription>
-              Enter the 6-character code shared by the bill creator.
+              Got a code from a friend? Enter it below to join their split.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleJoin} className="space-y-4">
+            <form onSubmit={handleJoin} className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="code">Bill Code</Label>
                 <Input
                   id="code"
-                  placeholder="e.g., ABC123"
+                  placeholder="ABC123"
                   value={code}
                   onChange={(e) => setCode(e.target.value.toUpperCase())}
                   maxLength={6}
-                  className="text-center text-2xl font-mono tracking-widest uppercase"
+                  className="text-center text-3xl font-mono tracking-[0.5em] uppercase h-16 bg-muted/50"
                 />
               </div>
 
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button type="submit" className="w-full transition-smooth hover:scale-105" size="lg" disabled={isLoading}>
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Finding Bill...
                   </>
                 ) : (
-                  'Join Bill'
+                  "Find My Bill"
                 )}
               </Button>
             </form>
