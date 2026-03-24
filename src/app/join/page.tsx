@@ -49,19 +49,19 @@ export default function JoinPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-background to-muted py-8">
+    <main className="min-h-screen py-8">
       <div className="container mx-auto px-4 max-w-md">
-        <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-foreground mb-6 transition-smooth">
+        <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Home
         </Link>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-sm bg-white/5 border-white/10 backdrop-blur-sm">
           <CardHeader className="text-center">
-            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Users className="h-8 w-8 text-primary" />
+            <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <Users className="h-8 w-8 text-violet-400" />
             </div>
-            <CardTitle className="text-2xl">Join a Bill</CardTitle>
+            <CardTitle className="text-2xl text-white">Join a <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">Bill</span></CardTitle>
             <CardDescription>
               Got a code from a friend? Enter it below to join their split.
             </CardDescription>

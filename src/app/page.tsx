@@ -9,6 +9,7 @@ import { Receipt, Users, Calculator, Share2, ChevronRight, Loader2, Sparkles, X,
 import { formatCurrency } from '@/lib/calculations';
 import { Bill, Participant } from '@/types';
 
+
 interface StoredBill {
   id: string;
   name: string;
@@ -29,42 +30,54 @@ export default function Home() {
   const [showHidden, setShowHidden] = useState(false);
 
   useEffect(() => {
-    // Load bills from localStorage
-    const stored = localStorage.getItem('splittr-my-bills');
-    if (stored) {
-      try {
-        const bills: StoredBill[] = JSON.parse(stored);
-        setMyBills(bills);
+    const loadBills = async () => {
+      // Load bills from localStorage
+      const stored = localStorage.getItem('splittr-my-bills');
+      if (stored) {
+        try {
+          const bills: StoredBill[] = JSON.parse(stored);
+          setMyBills(bills);
 
-        // Fetch details for each bill
-        bills.forEach(async (bill) => {
-          try {
-            const response = await fetch(`/api/bills/${bill.id}`);
-            if (response.ok) {
-              const data = await response.json();
-              setBillDetails(prev => ({ ...prev, [bill.id]: data }));
+          // Fetch details for all bills in parallel
+          const fetchPromises = bills.map(async (bill) => {
+            try {
+              const response = await fetch(`/api/bills/${bill.id}`);
+              if (response.ok) {
+                const data = await response.json();
+                return { id: bill.id, data };
+              }
+            } catch (error) {
+              console.error('Error fetching bill:', error);
             }
-          } catch (error) {
-            console.error('Error fetching bill:', error);
-          }
-        });
-      } catch (error) {
-        console.error('Error parsing stored bills:', error);
-      }
-    }
+            return null;
+          });
 
-    // Load hidden bills from localStorage
-    const hiddenStored = localStorage.getItem('splittr-hidden-bills');
-    if (hiddenStored) {
-      try {
-        const hiddenIds: string[] = JSON.parse(hiddenStored);
-        setHiddenBillIds(new Set(hiddenIds));
-      } catch (error) {
-        console.error('Error parsing hidden bills:', error);
+          const results = await Promise.all(fetchPromises);
+          const details: Record<string, BillWithParticipants> = {};
+          results.forEach(result => {
+            if (result) details[result.id] = result.data;
+          });
+          setBillDetails(details);
+        } catch (error) {
+          console.error('Error parsing stored bills:', error);
+        }
       }
-    }
 
-    setIsLoading(false);
+      // Load hidden bills from localStorage
+      const hiddenStored = localStorage.getItem('splittr-hidden-bills');
+      if (hiddenStored) {
+        try {
+          const hiddenIds: string[] = JSON.parse(hiddenStored);
+          setHiddenBillIds(new Set(hiddenIds));
+        } catch (error) {
+          console.error('Error parsing hidden bills:', error);
+        }
+      }
+
+      setIsLoading(false);
+    };
+
+    loadBills();
   }, []);
 
   const handleHideBill = (e: React.MouseEvent, billId: string) => {
@@ -93,41 +106,49 @@ export default function Home() {
   const displayedBills = showHidden ? myBills : visibleBills;
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-background to-muted">
+    <main className="relative min-h-screen">
       <div className="container mx-auto px-4 py-16">
         {/* Hero Section */}
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-full text-sm font-medium mb-6">
-            <Sparkles className="h-4 w-4" />
-            No app download needed
-          </div>
-          <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-            Splittr
-          </h1>
-          <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-            Split bills with friends the easy way. Scan your receipt, share with your group,
-            and let everyone pick what they ordered.
-          </p>
-          <div className="flex gap-4 justify-center flex-wrap">
-            <Link href="/create">
-              <Button size="lg" className="text-lg px-8 transition-smooth hover:scale-105">
-                <Receipt className="mr-2 h-5 w-5" />
-                Split a Bill
-              </Button>
-            </Link>
-            <Link href="/join">
-              <Button size="lg" variant="outline" className="text-lg px-8 transition-smooth hover:scale-105">
-                <Users className="mr-2 h-5 w-5" />
-                Join a Bill
-              </Button>
-            </Link>
+        <div className="relative text-center mb-16">
+          {/* Hero content */}
+          <div className="relative z-10">
+            <div className="inline-flex items-center gap-2 bg-white/5 backdrop-blur-sm text-white/60 px-4 py-2 rounded-full text-sm font-medium mb-8 border border-white/10">
+              <Sparkles className="h-4 w-4" />
+              No app download needed
+            </div>
+            <h1 className="text-6xl sm:text-7xl md:text-8xl font-bold mb-6 tracking-tight">
+              <span className="text-white">Split bills.</span>
+              <br />
+              <span className="bg-gradient-to-r from-blue-400 via-violet-400 to-purple-500 bg-clip-text text-transparent">
+                Effortlessly.
+              </span>
+            </h1>
+            <p className="text-lg sm:text-xl text-white/50 mb-10 max-w-xl mx-auto leading-relaxed font-light">
+              Scan your receipt. Share with the group.
+              <br className="hidden sm:block" />
+              Everyone picks what they ordered.
+            </p>
+            <div className="flex gap-4 justify-center flex-wrap">
+              <Link href="/create">
+                <Button size="lg" className="text-lg px-8 bg-white text-black hover:bg-white/90 transition-smooth hover:scale-105 rounded-full">
+                  <Receipt className="mr-2 h-5 w-5" />
+                  Split a Bill
+                </Button>
+              </Link>
+              <Link href="/join">
+                <Button size="lg" variant="outline" className="text-lg px-8 transition-smooth hover:scale-105 rounded-full border-white/20 text-white hover:bg-white/10">
+                  <Users className="mr-2 h-5 w-5" />
+                  Join a Bill
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
 
         {/* My Bills Section */}
         {!isLoading && myBills.length > 0 && (
           <div className="mb-16 animate-slide-up">
-            <h2 className="text-3xl font-semibold text-center mb-6">Your Bills</h2>
+            <h2 className="text-3xl font-semibold text-center mb-6 text-white">Your Bills</h2>
 
             {/* Show hidden toggle */}
             {hiddenBills.length > 0 && (
@@ -169,12 +190,12 @@ export default function Home() {
                                 {bill.role === 'creator' ? 'Host' : 'Joined'}
                               </Badge>
                               {details?.status === 'settled' ? (
-                                <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/20">
                                   <CheckCircle2 className="h-3 w-3 mr-1" />
                                   Settled
                                 </Badge>
                               ) : details?.status === 'active' ? (
-                                <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
+                                <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-400 border-amber-500/20">
                                   <Clock className="h-3 w-3 mr-1" />
                                   Active
                                 </Badge>
@@ -199,7 +220,7 @@ export default function Home() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="h-8 w-8 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                                 onClick={(e) => handleUnhideBill(e, bill.id)}
                                 title="Restore bill"
                               >
@@ -209,7 +230,7 @@ export default function Home() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="h-8 w-8 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                                 onClick={(e) => handleHideBill(e, bill.id)}
                                 title="Archive bill"
                               >
@@ -250,14 +271,14 @@ export default function Home() {
 
         {/* How it Works */}
         <div className="mb-16">
-          <h2 className="text-3xl font-semibold text-center mb-8">How It Works</h2>
+          <h2 className="text-3xl font-semibold text-center mb-8 text-white">How <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">It Works</span></h2>
           <div className="grid md:grid-cols-4 gap-6">
-            <Card className="shadow-sm transition-smooth hover:shadow-md">
+            <Card className="shadow-sm transition-smooth hover:shadow-md bg-white/5 border-white/10 backdrop-blur-sm">
               <CardHeader>
-                <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center mb-2">
-                  <Receipt className="h-6 w-6 text-primary" />
+                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-2">
+                  <Receipt className="h-6 w-6 text-blue-400" />
                 </div>
-                <CardTitle className="text-lg">1. Scan Receipt</CardTitle>
+                <CardTitle className="text-lg text-white">1. Scan Receipt</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription>
@@ -266,12 +287,12 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            <Card className="shadow-sm transition-smooth hover:shadow-md">
+            <Card className="shadow-sm transition-smooth hover:shadow-md bg-white/5 border-white/10 backdrop-blur-sm">
               <CardHeader>
-                <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center mb-2">
-                  <Share2 className="h-6 w-6 text-primary" />
+                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-2">
+                  <Share2 className="h-6 w-6 text-violet-400" />
                 </div>
-                <CardTitle className="text-lg">2. Share Link</CardTitle>
+                <CardTitle className="text-lg text-white">2. Share Link</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription>
@@ -280,12 +301,12 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            <Card className="shadow-sm transition-smooth hover:shadow-md">
+            <Card className="shadow-sm transition-smooth hover:shadow-md bg-white/5 border-white/10 backdrop-blur-sm">
               <CardHeader>
-                <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center mb-2">
-                  <Users className="h-6 w-6 text-primary" />
+                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-2">
+                  <Users className="h-6 w-6 text-purple-400" />
                 </div>
-                <CardTitle className="text-lg">3. Claim Items</CardTitle>
+                <CardTitle className="text-lg text-white">3. Claim Items</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription>
@@ -294,12 +315,12 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            <Card className="shadow-sm transition-smooth hover:shadow-md">
+            <Card className="shadow-sm transition-smooth hover:shadow-md bg-white/5 border-white/10 backdrop-blur-sm">
               <CardHeader>
-                <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center mb-2">
-                  <Calculator className="h-6 w-6 text-primary" />
+                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-2">
+                  <Calculator className="h-6 w-6 text-blue-400" />
                 </div>
-                <CardTitle className="text-lg">4. See Your Share</CardTitle>
+                <CardTitle className="text-lg text-white">4. See Your Share</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription>
@@ -312,23 +333,23 @@ export default function Home() {
 
         {/* Features */}
         <div className="text-center">
-          <h2 className="text-3xl font-semibold mb-8">Why Splittr?</h2>
+          <h2 className="text-3xl font-semibold mb-8 text-white">Why <span className="bg-gradient-to-r from-violet-400 to-purple-500 bg-clip-text text-transparent">Splittr</span>?</h2>
           <div className="grid md:grid-cols-3 gap-8 max-w-4xl mx-auto">
-            <div className="p-6 rounded-2xl bg-card shadow-sm">
-              <h3 className="font-semibold mb-2 text-lg">No App Download</h3>
-              <p className="text-muted-foreground">
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
+              <h3 className="font-semibold mb-2 text-lg text-white">No App Download</h3>
+              <p className="text-white/40">
                 Works right in the browser. Just share a link.
               </p>
             </div>
-            <div className="p-6 rounded-2xl bg-card shadow-sm">
-              <h3 className="font-semibold mb-2 text-lg">Fair Splitting</h3>
-              <p className="text-muted-foreground">
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
+              <h3 className="font-semibold mb-2 text-lg text-white">Fair Splitting</h3>
+              <p className="text-white/40">
                 Tax and tip proportional to what you ordered.
               </p>
             </div>
-            <div className="p-6 rounded-2xl bg-card shadow-sm">
-              <h3 className="font-semibold mb-2 text-lg">Real-time Updates</h3>
-              <p className="text-muted-foreground">
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
+              <h3 className="font-semibold mb-2 text-lg text-white">Real-time Updates</h3>
+              <p className="text-white/40">
                 See when others claim items instantly.
               </p>
             </div>

@@ -104,7 +104,7 @@ export default function BillPage() {
 
   // Set up real-time subscriptions
   useEffect(() => {
-    if (!bill) return;
+    if (!bill || items.length === 0) return;
 
     const supabase = createClient();
 
@@ -125,7 +125,7 @@ export default function BillPage() {
       )
       .subscribe();
 
-    // Subscribe to claims changes
+    // Subscribe to claims changes - only for items in this bill
     const claimsChannel = supabase
       .channel('claims-changes')
       .on(
@@ -134,6 +134,7 @@ export default function BillPage() {
           event: '*',
           schema: 'public',
           table: 'item_claims',
+          filter: `item_id=in.(${items.map(i => i.id).join(',')})`,
         },
         () => {
           fetchBill();
@@ -145,7 +146,7 @@ export default function BillPage() {
       supabase.removeChannel(participantsChannel);
       supabase.removeChannel(claimsChannel);
     };
-  }, [bill, fetchBill]);
+  }, [bill, items, fetchBill]);
 
   // Check for saved participant in localStorage
   useEffect(() => {
@@ -223,7 +224,7 @@ export default function BillPage() {
           method: 'DELETE',
         });
         toast.success("Got it, you're off the hook!");
-        await fetchBill();
+        // fetchBill() will be called automatically via realtime subscription
       } catch (error) {
         console.error('Error unclaiming:', error);
         toast.error('Oops, something went wrong');
@@ -264,7 +265,7 @@ export default function BillPage() {
         }),
       });
       toast.success('Nice pick!');
-      await fetchBill();
+      // fetchBill() will be called automatically via realtime subscription
     } catch (error) {
       console.error('Error claiming:', error);
       toast.error('Oops, something went wrong');
@@ -290,7 +291,7 @@ export default function BillPage() {
         }),
       });
       toast.success(`Claimed ${quantity} of ${quantityPickerItem.quantity}!`);
-      await fetchBill();
+      // fetchBill() will be called automatically via realtime subscription
     } catch (error) {
       console.error('Error claiming:', error);
       toast.error('Oops, something went wrong');
@@ -392,7 +393,7 @@ export default function BillPage() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-background to-muted py-8">
+      <main className="min-h-screen py-8">
         <div className="container mx-auto px-4 max-w-2xl flex flex-col justify-center items-center min-h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
           <p className="text-muted-foreground">Loading your bill...</p>
@@ -403,7 +404,7 @@ export default function BillPage() {
 
   if (!bill) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-background to-muted py-8">
+      <main className="min-h-screen py-8">
         <div className="container mx-auto px-4 max-w-2xl">
           <Card className="shadow-lg">
             <CardContent className="py-12 text-center">
@@ -427,7 +428,7 @@ export default function BillPage() {
   const myShare = splits.find((s) => s.participant.id === currentParticipant?.id);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-background to-muted py-8 pb-36">
+    <main className="min-h-screen py-8 pb-36">
       {/* Confetti overlay */}
       {showConfetti && (
         <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
@@ -437,7 +438,7 @@ export default function BillPage() {
               className="absolute w-3 h-3 rounded-sm"
               style={{
                 left: `${Math.random() * 100}%`,
-                backgroundColor: ['#14b8a6', '#f59e0b', '#ec4899', '#8b5cf6', '#10b981'][
+                backgroundColor: ['#60a5fa', '#a78bfa', '#c084fc', '#818cf8', '#38bdf8'][
                   Math.floor(Math.random() * 5)
                 ],
                 animation: `confetti-fall ${2 + Math.random() * 2}s linear forwards`,
@@ -449,7 +450,7 @@ export default function BillPage() {
       )}
 
       <div className="container mx-auto px-4 max-w-2xl">
-        <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-foreground mb-6 transition-smooth">
+        <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Home
         </Link>
@@ -462,7 +463,7 @@ export default function BillPage() {
                 <div className="flex items-center gap-2 mb-1">
                   <h1 className="text-2xl font-bold">{bill.name}</h1>
                   {bill.status === 'settled' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400">
                       <CheckCircle2 className="h-3 w-3" />
                       Settled
                     </span>

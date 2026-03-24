@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
+import { AnimatedBackground } from "@/components/ui/animated-background";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -38,11 +39,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={`dark ${geistSans.variable} ${geistMono.variable}`}>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className="antialiased bg-background"
       >
-        {children}
+        <AnimatedBackground />
+        <div className="relative z-10">
+          {children}
+        </div>
         <Toaster />
       </body>
     </html>

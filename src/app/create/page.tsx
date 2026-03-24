@@ -152,14 +152,14 @@ export default function CreatePage() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-background to-muted py-8">
+    <main className="min-h-screen py-8">
       <div className="container mx-auto px-4 max-w-2xl">
-        <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-foreground mb-6 transition-smooth">
+        <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Home
         </Link>
 
-        <h1 className="text-3xl font-bold mb-8">Create a Bill</h1>
+        <h1 className="text-3xl font-bold mb-8 text-white">Create a <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">Bill</span></h1>
 
         {/* Step 1: Upload */}
         {step === 'upload' && (
@@ -241,49 +241,52 @@ export default function CreatePage() {
             <CardContent className="space-y-4">
               {/* Column headers */}
               {items.length > 0 && (
-                <div className="flex gap-2 items-center text-xs text-muted-foreground">
-                  <div className="flex-1">Item name</div>
-                  <div className="w-16 text-center">Qty</div>
-                  <div className="w-24 text-center">Each $</div>
-                  <div className="w-20 text-right">Total</div>
+                <div className="flex gap-1 sm:gap-2 items-center text-xs text-muted-foreground">
+                  <div className="flex-1 min-w-0">Item</div>
+                  <div className="w-12 sm:w-16 text-center">Qty</div>
+                  <div className="w-16 sm:w-24 text-center">Each $</div>
+                  <div className="hidden sm:block w-20 text-right">Total</div>
                   <div className="w-9"></div>
                 </div>
               )}
               {items.map((item, index) => (
-                <div key={index} className="flex gap-2 items-center">
-                  <div className="flex-1">
+                <div key={index} className="flex gap-1 sm:gap-2 items-center">
+                  <div className="flex-1 min-w-0">
                     <Input
                       placeholder="Item name"
                       value={item.name}
                       onChange={(e) => handleUpdateItem(index, 'name', e.target.value)}
+                      className="text-sm"
                     />
                   </div>
-                  <div className="w-16">
+                  <div className="w-12 sm:w-16 shrink-0">
                     <Input
                       type="number"
                       placeholder="Qty"
                       min="1"
                       value={item.quantity}
                       onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
-                      className="text-center"
+                      className="text-center text-sm"
                     />
                   </div>
-                  <div className="w-24">
+                  <div className="w-16 sm:w-24 shrink-0">
                     <Input
                       type="number"
                       step="0.01"
                       placeholder="0.00"
                       value={item.price || ''}
                       onChange={(e) => handleUpdateItem(index, 'price', e.target.value)}
+                      className="text-sm"
                     />
                   </div>
-                  <div className="w-20 text-right text-sm font-medium">
+                  <div className="hidden sm:block w-20 text-right text-sm font-medium shrink-0">
                     {formatCurrency(item.price * item.quantity)}
                   </div>
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={() => handleRemoveItem(index)}
+                    className="shrink-0"
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
