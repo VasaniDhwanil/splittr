@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -9,15 +9,28 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
-import { Camera, Upload, Plus, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
+import { Camera, Upload, Plus, Trash2, ArrowLeft, Loader2, ReceiptText, Divide, SlidersHorizontal, Wallet, Users } from 'lucide-react';
 import { formatCurrency } from '@/lib/calculations';
-import { ScannedReceipt } from '@/types';
+import { ScannedReceipt, SplitMode, TipSplit } from '@/types';
+import { createClient } from '@/lib/supabase/client';
 
 interface BillItem {
   name: string;
   price: number;
   quantity: number;
 }
+
+interface GroupOption {
+  id: string;
+  name: string;
+  emoji: string;
+}
+
+const SPLIT_MODES: { key: SplitMode; label: string; description: string; icon: typeof ReceiptText }[] = [
+  { key: 'items', label: 'By item', description: 'Everyone taps what they ordered', icon: ReceiptText },
+  { key: 'even', label: 'Evenly', description: 'Total divided equally', icon: Divide },
+  { key: 'custom', label: 'Custom', description: 'You assign each amount', icon: SlidersHorizontal },
+];
 
 export default function CreatePage() {
   const router = useRouter();
@@ -33,9 +46,43 @@ export default function CreatePage() {
   const [billName, setBillName] = useState('');
   const [creatorName, setCreatorName] = useState('');
 
+  const [splitMode, setSplitMode] = useState<SplitMode>('items');
+  const [tipSplit, setTipSplit] = useState<TipSplit>('proportional');
+  const [venmoHandle, setVenmoHandle] = useState('');
+  const [cashappHandle, setCashappHandle] = useState('');
+  const [paypalHandle, setPaypalHandle] = useState('');
+  const [showPayment, setShowPayment] = useState(false);
+
+  const [groups, setGroups] = useState<GroupOption[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const tipAmount = (subtotal + tax) * (tipPercent / 100);
   const total = subtotal + tax + tipAmount;
+
+  // Prefill payment handles from the last bill; load groups if signed in
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('splittr-payment-handles') || '{}');
+      if (saved.venmo) setVenmoHandle(saved.venmo);
+      if (saved.cashapp) setCashappHandle(saved.cashapp);
+      if (saved.paypal) setPaypalHandle(saved.paypal);
+      if (saved.venmo || saved.cashapp || saved.paypal) setShowPayment(true);
+    } catch {
+      // ignore bad localStorage
+    }
+
+    const loadGroups = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const res = await fetch('/api/groups');
+      if (res.ok) {
+        setGroups(await res.json());
+      }
+    };
+    loadGroups();
+  }, []);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -68,6 +115,13 @@ export default function CreatePage() {
     } finally {
       setIsScanning(false);
     }
+  };
+
+  const handleTotalOnly = () => {
+    setItems([{ name: 'Bill total', price: 0, quantity: 1 }]);
+    setSplitMode('even');
+    setTipPercent(0);
+    setStep('review');
   };
 
   const handleAddItem = () => {
@@ -116,6 +170,12 @@ export default function CreatePage() {
           tax,
           tip_percent: tipPercent,
           creator_name: creatorName,
+          split_mode: splitMode,
+          tip_split: tipSplit,
+          venmo_handle: venmoHandle,
+          cashapp_handle: cashappHandle,
+          paypal_handle: paypalHandle,
+          group_id: selectedGroupId,
         }),
       });
 
@@ -123,7 +183,13 @@ export default function CreatePage() {
         throw new Error('Failed to create bill');
       }
 
-      const { id, short_code, creator_participant_id } = await response.json();
+      const { id, short_code, creator_participant_id, creator_token } = await response.json();
+
+      // Remember payment handles for next time
+      localStorage.setItem(
+        'splittr-payment-handles',
+        JSON.stringify({ venmo: venmoHandle.trim(), cashapp: cashappHandle.trim(), paypal: paypalHandle.trim() })
+      );
 
       // Save to localStorage for "My Bills"
       const storedBills = JSON.parse(localStorage.getItem('splittr-my-bills') || '[]');
@@ -139,6 +205,11 @@ export default function CreatePage() {
       // Save creator's participant ID so they're recognized on the bill page
       if (creator_participant_id) {
         localStorage.setItem(`splittr-participant-${id}`, creator_participant_id);
+      }
+
+      // Save creator token for authenticated bill edits
+      if (creator_token) {
+        localStorage.setItem(`splittr-creator-token-${id}`, creator_token);
       }
 
       toast.success('Bill created!');
@@ -159,7 +230,7 @@ export default function CreatePage() {
           Back to Home
         </Link>
 
-        <h1 className="text-3xl font-bold mb-8 text-white">Create a <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">Bill</span></h1>
+        <h1 className="text-3xl font-bold mb-8 text-white">Create a <span className="bg-gradient-to-r from-emerald-300 to-green-400 bg-clip-text text-transparent">Bill</span></h1>
 
         {/* Step 1: Upload */}
         {step === 'upload' && (
@@ -219,10 +290,13 @@ export default function CreatePage() {
 
               <Separator className="my-6" />
 
-              <div className="text-center">
-                <p className="text-muted-foreground mb-4">Or enter items manually</p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
                 <Button variant="outline" onClick={() => setStep('review')}>
-                  Enter Manually
+                  Enter items manually
+                </Button>
+                <Button variant="outline" onClick={handleTotalOnly}>
+                  <Divide className="h-4 w-4 mr-2" />
+                  Just split a total
                 </Button>
               </div>
             </CardContent>
@@ -320,7 +394,7 @@ export default function CreatePage() {
                 <div className="flex justify-between items-center">
                   <Label htmlFor="tip">Tip %</Label>
                   <div className="flex gap-2">
-                    {[15, 18, 20, 25].map((pct) => (
+                    {[0, 15, 18, 20, 25].map((pct) => (
                       <Button
                         key={pct}
                         size="sm"
@@ -336,6 +410,27 @@ export default function CreatePage() {
                   <span>Tip Amount</span>
                   <span>{formatCurrency(tipAmount)}</span>
                 </div>
+                {tipAmount > 0 && (
+                  <div className="flex justify-between items-center">
+                    <Label>Tip split</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant={tipSplit === 'proportional' ? 'default' : 'outline'}
+                        onClick={() => setTipSplit('proportional')}
+                      >
+                        Like items
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={tipSplit === 'even' ? 'default' : 'outline'}
+                        onClick={() => setTipSplit('even')}
+                      >
+                        Equally
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <Separator />
                 <div className="flex justify-between font-bold text-lg">
                   <span>Total</span>
@@ -361,10 +456,10 @@ export default function CreatePage() {
             <CardHeader>
               <CardTitle>Bill Details</CardTitle>
               <CardDescription>
-                Give your bill a name and enter your name to create it.
+                Give your bill a name, choose how to split, and add how friends can pay you back.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="billName">Bill Name</Label>
                 <Input
@@ -383,6 +478,106 @@ export default function CreatePage() {
                   value={creatorName}
                   onChange={(e) => setCreatorName(e.target.value)}
                 />
+              </div>
+
+              {/* Split mode */}
+              <div className="space-y-2">
+                <Label>How should this split?</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {SPLIT_MODES.map((mode) => {
+                    const Icon = mode.icon;
+                    const selected = splitMode === mode.key;
+                    return (
+                      <button
+                        key={mode.key}
+                        type="button"
+                        onClick={() => setSplitMode(mode.key)}
+                        className={`p-3 rounded-xl border-2 text-left transition-smooth ${
+                          selected
+                            ? 'border-primary/60 bg-primary/10'
+                            : 'border-white/10 bg-white/5 hover:bg-white/10'
+                        }`}
+                      >
+                        <Icon className={`h-4 w-4 mb-1 ${selected ? 'text-primary' : 'text-white/40'}`} />
+                        <div className="text-sm font-medium">{mode.label}</div>
+                        <div className="text-xs text-muted-foreground leading-tight mt-0.5">{mode.description}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Group assignment */}
+              {groups.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-white/40" />
+                    Add to a group (optional)
+                  </Label>
+                  <div className="flex flex-wrap gap-2">
+                    {groups.map((group) => (
+                      <button
+                        key={group.id}
+                        type="button"
+                        onClick={() => setSelectedGroupId(selectedGroupId === group.id ? null : group.id)}
+                        className={`px-3 py-1.5 rounded-full text-sm border transition-smooth ${
+                          selectedGroupId === group.id
+                            ? 'border-primary/60 bg-primary/10 text-white'
+                            : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
+                        }`}
+                      >
+                        {group.emoji} {group.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Payment handles */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPayment(!showPayment)}
+                  className="flex items-center gap-2 text-sm font-medium text-white/70 hover:text-white transition-smooth"
+                >
+                  <Wallet className="h-4 w-4" />
+                  How friends pay you back (optional)
+                  <span className="text-white/30">{showPayment ? '−' : '+'}</span>
+                </button>
+                {showPayment && (
+                  <div className="space-y-3 p-4 rounded-xl bg-white/5 border border-white/10">
+                    <p className="text-xs text-muted-foreground">
+                      Add your handles and everyone gets one-tap payment links for their exact share.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="venmo" className="text-xs">Venmo</Label>
+                      <Input
+                        id="venmo"
+                        placeholder="@your-venmo"
+                        value={venmoHandle}
+                        onChange={(e) => setVenmoHandle(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="cashapp" className="text-xs">Cash App</Label>
+                      <Input
+                        id="cashapp"
+                        placeholder="$yourcashtag"
+                        value={cashappHandle}
+                        onChange={(e) => setCashappHandle(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="paypal" className="text-xs">PayPal.Me</Label>
+                      <Input
+                        id="paypal"
+                        placeholder="yourpaypalme"
+                        value={paypalHandle}
+                        onChange={(e) => setPaypalHandle(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <Separator className="my-4" />

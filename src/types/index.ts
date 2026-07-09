@@ -1,3 +1,6 @@
+export type SplitMode = 'items' | 'even' | 'custom';
+export type TipSplit = 'proportional' | 'even';
+
 export interface Bill {
   id: string;
   name: string;
@@ -9,6 +12,13 @@ export interface Bill {
   status: 'draft' | 'active' | 'settled';
   short_code: string;
   creator_id: string | null;
+  creator_user_id?: string | null;
+  split_mode: SplitMode;
+  tip_split?: TipSplit;
+  venmo_handle?: string | null;
+  cashapp_handle?: string | null;
+  paypal_handle?: string | null;
+  group_id?: string | null;
   created_at: string;
 }
 
@@ -27,6 +37,9 @@ export interface Participant {
   user_id: string | null;
   name: string;
   is_creator: boolean;
+  custom_amount?: number | null;
+  payment_status?: 'unpaid' | 'paid';
+  paid_at?: string | null;
   created_at: string;
 }
 
@@ -34,8 +47,24 @@ export interface ItemClaim {
   id: string;
   participant_id: string;
   item_id: string;
-  share: number; // 0-1, e.g., 0.5 = half
+  share: number; // fraction (0.5 = half) for single-qty items, integer count for multi-qty
   created_at: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  emoji: string;
+  creator_user_id: string;
+  created_at: string;
+}
+
+export interface GroupWithBills extends Group {
+  bills: BillWithParticipants[];
+}
+
+export interface BillWithParticipants extends Bill {
+  participants: Participant[];
 }
 
 // Extended types with relations

@@ -59,9 +59,9 @@ export default function JoinPage() {
         <Card className="shadow-sm bg-white/5 border-white/10 backdrop-blur-sm">
           <CardHeader className="text-center">
             <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Users className="h-8 w-8 text-violet-400" />
+              <Users className="h-8 w-8 text-emerald-300" />
             </div>
-            <CardTitle className="text-2xl text-white">Join a <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">Bill</span></CardTitle>
+            <CardTitle className="text-2xl text-white">Join a <span className="bg-gradient-to-r from-emerald-300 to-green-400 bg-clip-text text-transparent">Bill</span></CardTitle>
             <CardDescription>
               Got a code from a friend? Enter it below to join their split.
             </CardDescription>

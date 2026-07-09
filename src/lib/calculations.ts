@@ -9,12 +9,45 @@ export function generateShortCode(): string {
   return code;
 }
 
+export function billTotal(bill: Bill): number {
+  return bill.subtotal + bill.tax + bill.tip_amount;
+}
+
 export function calculateSplits(
   bill: Bill,
   items: BillItem[],
   participants: Participant[],
   claims: ItemClaim[]
 ): ParticipantSplit[] {
+  const mode = bill.split_mode || 'items';
+
+  if (mode === 'even') {
+    const n = participants.length || 1;
+    return participants.map((participant) => ({
+      participant,
+      itemsTotal: bill.subtotal / n,
+      taxShare: bill.tax / n,
+      tipShare: bill.tip_amount / n,
+      total: billTotal(bill) / n,
+      items: [],
+    }));
+  }
+
+  if (mode === 'custom') {
+    return participants.map((participant) => {
+      const amount = participant.custom_amount ?? 0;
+      return {
+        participant,
+        itemsTotal: amount,
+        taxShare: 0,
+        tipShare: 0,
+        total: amount,
+        items: [],
+      };
+    });
+  }
+
+  // Default: split by item claims
   const participantSplits: ParticipantSplit[] = [];
 
   // Create a map of item_id -> total claimed shares
@@ -48,12 +81,15 @@ export function calculateSplits(
       });
     }
 
-    // Calculate tax and tip proportionally based on items total
+    // Tax always follows what you ordered; tip follows the bill's tip_split setting
     const billSubtotal = bill.subtotal || items.reduce((sum, i) => sum + i.price * i.quantity, 0);
     const proportion = billSubtotal > 0 ? itemsTotal / billSubtotal : 0;
 
     const taxShare = bill.tax * proportion;
-    const tipShare = bill.tip_amount * proportion;
+    const tipShare =
+      bill.tip_split === 'even'
+        ? bill.tip_amount / (participants.length || 1)
+        : bill.tip_amount * proportion;
 
     participantSplits.push({
       participant,
@@ -77,8 +113,10 @@ export function formatCurrency(amount: number): string {
 
 export function formatShare(share: number): string {
   if (share === 1) return 'Full';
-  if (share === 0.5) return 'Half';
-  if (share === 0.25) return 'Quarter';
-  if (share === 0.33 || share === 0.34) return 'Third';
+  if (share === 0.75) return '¾';
+  if (Math.abs(share - 2 / 3) < 0.01) return '⅔';
+  if (share === 0.5) return '½';
+  if (Math.abs(share - 1 / 3) < 0.01) return '⅓';
+  if (share === 0.25) return '¼';
   return `${Math.round(share * 100)}%`;
 }

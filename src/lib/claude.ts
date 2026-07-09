@@ -5,10 +5,39 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+const RECEIPT_SCHEMA = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          price: { type: 'number' },
+          quantity: { type: 'integer' },
+        },
+        required: ['name', 'price', 'quantity'],
+        additionalProperties: false,
+      },
+    },
+    subtotal: { type: 'number' },
+    tax: { type: 'number' },
+    total: { type: 'number' },
+  },
+  required: ['items', 'subtotal', 'tax', 'total'],
+  additionalProperties: false,
+} as const;
+
 export async function scanReceipt(imageBase64: string, mimeType: string): Promise<ScannedReceipt> {
   const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 1024,
+    model: 'claude-sonnet-5',
+    max_tokens: 4096,
+    thinking: { type: 'disabled' },
+    output_config: {
+      effort: 'low',
+      format: { type: 'json_schema', schema: RECEIPT_SCHEMA },
+    },
     messages: [
       {
         role: 'user',
@@ -54,18 +83,11 @@ Rules:
     ],
   });
 
-  // Extract the text content from the response
+  // With structured outputs the response text is guaranteed to match the schema
   const textContent = response.content.find((block) => block.type === 'text');
   if (!textContent || textContent.type !== 'text') {
     throw new Error('No text response from Claude');
   }
 
-  // Parse the JSON from the response
-  const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('Could not parse receipt data from response');
-  }
-
-  const data = JSON.parse(jsonMatch[0]) as ScannedReceipt;
-  return data;
+  return JSON.parse(textContent.text) as ScannedReceipt;
 }

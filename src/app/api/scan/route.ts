@@ -13,6 +13,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (file.type && !ALLOWED_TYPES.includes(file.type)) {
+      return NextResponse.json(
+        { error: 'Unsupported file type — upload a photo of your receipt' },
+        { status: 400 }
+      );
+    }
+
+    const MAX_SIZE = 10 * 1024 * 1024; // Claude vision caps images well below this
+    if (file.size > MAX_SIZE) {
+      return NextResponse.json(
+        { error: 'Image too large (max 10MB)' },
+        { status: 400 }
+      );
+    }
+
     // Convert file to base64
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);

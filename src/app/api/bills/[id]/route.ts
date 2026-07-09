@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireBillOwnership } from '@/lib/auth-helpers';
 
 export async function GET(
   request: NextRequest,
@@ -71,14 +72,36 @@ export async function PATCH(
   try {
     const { id } = await params;
     const supabase = await createClient();
+
+    // Ownership check — token or session required for mutations
+    const ownership = await requireBillOwnership(request, id, supabase);
+    if (ownership.notFound) {
+      return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
+    }
+    if (!ownership.authorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
     const body = await request.json();
 
-    const { tip_percent, status } = body;
+    const {
+      name,
+      tip_percent,
+      status,
+      tax,
+      split_mode,
+      tip_split,
+      venmo_handle,
+      cashapp_handle,
+      paypal_handle,
+      group_id,
+      items,
+    } = body;
 
     // Get current bill
     const { data: bill } = await supabase
       .from('bills')
-      .select('subtotal, tax')
+      .select('subtotal, tax, tip_percent')
       .eq('id', id)
       .single();
 
@@ -89,16 +112,16 @@ export async function PATCH(
       );
     }
 
-    // Build update object
-    const updateData: { tip_percent?: number; tip_amount?: number; status?: string } = {};
+    const updateData: Record<string, unknown> = {};
 
-    if (tip_percent !== undefined) {
-      updateData.tip_percent = tip_percent;
-      updateData.tip_amount = (bill.subtotal + bill.tax) * (tip_percent / 100);
+    if (name !== undefined) {
+      if (typeof name !== 'string' || !name.trim()) {
+        return NextResponse.json({ error: 'Invalid name' }, { status: 400 });
+      }
+      updateData.name = name.trim();
     }
 
     if (status !== undefined) {
-      // Validate status value
       if (!['draft', 'active', 'settled'].includes(status)) {
         return NextResponse.json(
           { error: 'Invalid status value' },
@@ -106,6 +129,76 @@ export async function PATCH(
         );
       }
       updateData.status = status;
+    }
+
+    if (split_mode !== undefined) {
+      if (!['items', 'even', 'custom'].includes(split_mode)) {
+        return NextResponse.json({ error: 'Invalid split_mode' }, { status: 400 });
+      }
+      updateData.split_mode = split_mode;
+    }
+
+    if (tip_split !== undefined) {
+      if (!['proportional', 'even'].includes(tip_split)) {
+        return NextResponse.json({ error: 'Invalid tip_split' }, { status: 400 });
+      }
+      updateData.tip_split = tip_split;
+    }
+
+    if (venmo_handle !== undefined) updateData.venmo_handle = venmo_handle?.trim() || null;
+    if (cashapp_handle !== undefined) updateData.cashapp_handle = cashapp_handle?.trim() || null;
+    if (paypal_handle !== undefined) updateData.paypal_handle = paypal_handle?.trim() || null;
+    if (group_id !== undefined) updateData.group_id = group_id || null;
+
+    // Sync items if provided: update kept rows (claims survive), insert new, delete removed
+    let subtotal = bill.subtotal;
+    if (Array.isArray(items)) {
+      if (items.length === 0) {
+        return NextResponse.json({ error: 'Bill must have at least one item' }, { status: 400 });
+      }
+
+      const { data: existingItems } = await supabase
+        .from('bill_items')
+        .select('id')
+        .eq('bill_id', id);
+      const existingIds = new Set((existingItems || []).map((i) => i.id));
+
+      const keptIds = new Set<string>();
+      for (const item of items) {
+        const clean = {
+          name: String(item.name || '').trim() || 'Item',
+          price: Number(item.price) || 0,
+          quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
+        };
+        if (item.id && existingIds.has(item.id)) {
+          keptIds.add(item.id);
+          await supabase.from('bill_items').update(clean).eq('id', item.id);
+        } else {
+          await supabase.from('bill_items').insert({ bill_id: id, ...clean });
+        }
+      }
+
+      const toDelete = [...existingIds].filter((existingId) => !keptIds.has(existingId));
+      if (toDelete.length > 0) {
+        await supabase.from('bill_items').delete().in('id', toDelete);
+      }
+
+      subtotal = items.reduce(
+        (sum: number, item: { price: number; quantity: number }) =>
+          sum + (Number(item.price) || 0) * Math.max(1, Math.round(Number(item.quantity) || 1)),
+        0
+      );
+      updateData.subtotal = subtotal;
+    }
+
+    const newTax = tax !== undefined ? Number(tax) || 0 : bill.tax;
+    if (tax !== undefined) updateData.tax = newTax;
+
+    // Recompute tip whenever any of its inputs changed
+    const newTipPercent = tip_percent !== undefined ? Number(tip_percent) || 0 : bill.tip_percent;
+    if (tip_percent !== undefined) updateData.tip_percent = newTipPercent;
+    if (tip_percent !== undefined || tax !== undefined || Array.isArray(items)) {
+      updateData.tip_amount = (subtotal + newTax) * (newTipPercent / 100);
     }
 
     const { data: updatedBill, error } = await supabase
@@ -125,6 +218,43 @@ export async function PATCH(
     return NextResponse.json(updatedBill);
   } catch (error) {
     console.error('Error updating bill:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const supabase = await createClient();
+
+    const ownership = await requireBillOwnership(request, id, supabase);
+    if (ownership.notFound) {
+      return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
+    }
+    if (!ownership.authorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
+    // Items, participants, and claims cascade-delete with the bill
+    const { error } = await supabase.from('bills').delete().eq('id', id);
+
+    if (error) {
+      console.error('Error deleting bill:', error);
+      return NextResponse.json(
+        { error: 'Failed to delete bill' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error in bills DELETE:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

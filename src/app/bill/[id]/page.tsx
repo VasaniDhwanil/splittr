@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,14 +17,47 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { ArrowLeft, Copy, Share2, Check, Users, Loader2, Sparkles, CheckCircle2, RotateCcw } from 'lucide-react';
-import { formatCurrency, calculateSplits } from '@/lib/calculations';
-import { Bill, BillItem, Participant, ItemClaim, ParticipantSplit } from '@/types';
+import {
+  ArrowLeft,
+  Copy,
+  Share2,
+  Check,
+  Users,
+  Loader2,
+  Sparkles,
+  CheckCircle2,
+  RotateCcw,
+  Pencil,
+  Trash2,
+  Plus,
+  Wallet,
+  Divide,
+  ReceiptText,
+  SlidersHorizontal,
+  ExternalLink,
+} from 'lucide-react';
+import { formatCurrency, calculateSplits, billTotal, formatShare } from '@/lib/calculations';
+import { getPaymentOptions, billHasPaymentMethods } from '@/lib/payment-links';
+import { Bill, BillItem, Participant, ItemClaim, ParticipantSplit, SplitMode, TipSplit } from '@/types';
 import { createClient } from '@/lib/supabase/client';
-import { AvatarInitials, AvatarStack } from '@/components/avatar-initials';
+import { AvatarInitials, AvatarStack, getPersonHex } from '@/components/avatar-initials';
+
+interface EditableItem {
+  id?: string;
+  name: string;
+  price: number;
+  quantity: number;
+}
+
+const SPLIT_MODE_META: Record<SplitMode, { label: string; icon: typeof ReceiptText }> = {
+  items: { label: 'By item', icon: ReceiptText },
+  even: { label: 'Split evenly', icon: Divide },
+  custom: { label: 'Custom amounts', icon: SlidersHorizontal },
+};
 
 export default function BillPage() {
   const params = useParams();
+  const router = useRouter();
   const billId = params.id as string;
 
   const [isLoading, setIsLoading] = useState(true);
@@ -49,8 +82,34 @@ export default function BillPage() {
   const [quantityPickerItem, setQuantityPickerItem] = useState<BillItem | null>(null);
   const [showQuantityPicker, setShowQuantityPicker] = useState(false);
 
+  // Portion picker for uneven splits of shared items (e.g. ⅔ of a pasta)
+  const [portionPickerItem, setPortionPickerItem] = useState<BillItem | null>(null);
+  const [showPortionPicker, setShowPortionPicker] = useState(false);
+
   // Bill status
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+  // Creator tools
+  const [hasCreatorToken, setHasCreatorToken] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editItems, setEditItems] = useState<EditableItem[]>([]);
+  const [editTax, setEditTax] = useState(0);
+  const [editTipPercent, setEditTipPercent] = useState(18);
+  const [editTipSplit, setEditTipSplit] = useState<TipSplit>('proportional');
+  const [editSplitMode, setEditSplitMode] = useState<SplitMode>('items');
+  const [editVenmo, setEditVenmo] = useState('');
+  const [editCashapp, setEditCashapp] = useState('');
+  const [editPaypal, setEditPaypal] = useState('');
+
+  // Payments
+  const [payingParticipantId, setPayingParticipantId] = useState<string | null>(null);
+  const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
+
+  const splitMode: SplitMode = bill?.split_mode || 'items';
 
   const fetchBill = useCallback(async () => {
     try {
@@ -72,9 +131,11 @@ export default function BillPage() {
 
   // Calculate splits whenever data changes
   useEffect(() => {
-    if (bill && items.length > 0 && participants.length > 0) {
+    if (bill && participants.length > 0) {
       const calculatedSplits = calculateSplits(bill, items, participants, claims);
       setSplits(calculatedSplits);
+
+      if ((bill.split_mode || 'items') !== 'items') return;
 
       // Check if all items are fully claimed (total shares >= quantity)
       const allItemsClaimed = claims.length > 0 && items.every((item) => {
@@ -104,7 +165,7 @@ export default function BillPage() {
 
   // Set up real-time subscriptions
   useEffect(() => {
-    if (!bill || items.length === 0) return;
+    if (!bill) return;
 
     const supabase = createClient();
 
@@ -125,16 +186,16 @@ export default function BillPage() {
       )
       .subscribe();
 
-    // Subscribe to claims changes - only for items in this bill
-    const claimsChannel = supabase
-      .channel('claims-changes')
+    // Subscribe to bill changes (edits, status, payment handles)
+    const billChannel = supabase
+      .channel('bill-changes')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'item_claims',
-          filter: `item_id=in.(${items.map(i => i.id).join(',')})`,
+          table: 'bills',
+          filter: `id=eq.${bill.id}`,
         },
         () => {
           fetchBill();
@@ -142,13 +203,51 @@ export default function BillPage() {
       )
       .subscribe();
 
+    // Subscribe to item changes (creator edits)
+    const itemsChannel = supabase
+      .channel('items-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bill_items',
+          filter: `bill_id=eq.${bill.id}`,
+        },
+        () => {
+          fetchBill();
+        }
+      )
+      .subscribe();
+
+    // Subscribe to claims changes - only for items in this bill
+    const claimsChannel = items.length > 0
+      ? supabase
+          .channel('claims-changes')
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'item_claims',
+              filter: `item_id=in.(${items.map(i => i.id).join(',')})`,
+            },
+            () => {
+              fetchBill();
+            }
+          )
+          .subscribe()
+      : null;
+
     return () => {
       supabase.removeChannel(participantsChannel);
-      supabase.removeChannel(claimsChannel);
+      supabase.removeChannel(billChannel);
+      supabase.removeChannel(itemsChannel);
+      if (claimsChannel) supabase.removeChannel(claimsChannel);
     };
   }, [bill, items, fetchBill]);
 
-  // Check for saved participant in localStorage
+  // Check for saved participant + creator token in localStorage
   useEffect(() => {
     if (!bill) return;
     const savedId = localStorage.getItem(`splittr-participant-${bill.id}`);
@@ -158,7 +257,16 @@ export default function BillPage() {
         setCurrentParticipant(participant);
       }
     }
+    setHasCreatorToken(Boolean(localStorage.getItem(`splittr-creator-token-${bill.id}`)));
   }, [bill, participants]);
+
+  const isCreator = Boolean(currentParticipant?.is_creator) || hasCreatorToken;
+  const creatorParticipant = participants.find((p) => p.is_creator);
+
+  const creatorHeaders = (): Record<string, string> => ({
+    'Content-Type': 'application/json',
+    'X-Creator-Token': bill ? localStorage.getItem(`splittr-creator-token-${bill.id}`) || '' : '',
+  });
 
   const handleJoin = async () => {
     if (!joinName.trim() || !bill) return;
@@ -207,6 +315,8 @@ export default function BillPage() {
   };
 
   const handleToggleClaim = async (item: BillItem) => {
+    if (splitMode !== 'items') return;
+
     if (!currentParticipant) {
       setShowJoinDialog(true);
       return;
@@ -246,12 +356,6 @@ export default function BillPage() {
       return;
     }
 
-    // Single quantity item - check if already claimed by someone else
-    const existingClaimers = claims.filter((c) => c.item_id === item.id);
-    if (existingClaimers.length > 0) {
-      // Already claimed - allow shared claiming (original behavior)
-    }
-
     // Claim directly
     setClaimingItemId(item.id);
     try {
@@ -271,6 +375,33 @@ export default function BillPage() {
       toast.error('Oops, something went wrong');
     } finally {
       setTimeout(() => setClaimingItemId(null), 300);
+    }
+  };
+
+  const handlePortionClaim = async (fraction: number) => {
+    if (!currentParticipant || !portionPickerItem) return;
+
+    setShowPortionPicker(false);
+    setClaimingItemId(portionPickerItem.id);
+
+    try {
+      await fetch('/api/claims', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          participant_id: currentParticipant.id,
+          item_id: portionPickerItem.id,
+          share: fraction,
+        }),
+      });
+      toast.success(`Got it — ${formatShare(fraction)} of ${portionPickerItem.name}`);
+      await fetchBill();
+    } catch (error) {
+      console.error('Error updating portion:', error);
+      toast.error('Oops, something went wrong');
+    } finally {
+      setTimeout(() => setClaimingItemId(null), 300);
+      setPortionPickerItem(null);
     }
   };
 
@@ -317,7 +448,7 @@ export default function BillPage() {
           text: `Join this bill and select your items. Code: ${bill.short_code}`,
           url: window.location.href,
         });
-      } catch (error) {
+      } catch {
         // User cancelled or share failed
         handleCopyLink();
       }
@@ -335,9 +466,14 @@ export default function BillPage() {
     try {
       const response = await fetch(`/api/bills/${bill.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: creatorHeaders(),
         body: JSON.stringify({ status: newStatus }),
       });
+
+      if (response.status === 403) {
+        toast.error('Only the bill creator can edit this');
+        return;
+      }
 
       if (!response.ok) throw new Error('Failed to update status');
 
@@ -348,6 +484,149 @@ export default function BillPage() {
       toast.error('Failed to update bill status');
     } finally {
       setIsUpdatingStatus(false);
+    }
+  };
+
+  const handleTogglePaid = async (participant: Participant) => {
+    const newStatus = participant.payment_status === 'paid' ? 'unpaid' : 'paid';
+    setPayingParticipantId(participant.id);
+    try {
+      const response = await fetch('/api/participants', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ participant_id: participant.id, payment_status: newStatus }),
+      });
+      if (!response.ok) throw new Error('Failed to update payment status');
+      toast.success(
+        newStatus === 'paid'
+          ? `${participant.id === currentParticipant?.id ? 'You are' : participant.name + ' is'} marked as paid 🎉`
+          : 'Marked as unpaid'
+      );
+      await fetchBill();
+    } catch (error) {
+      console.error('Error updating payment status:', error);
+      toast.error('Failed to update payment status');
+    } finally {
+      setPayingParticipantId(null);
+    }
+  };
+
+  const handleSaveCustomAmount = async (participant: Participant) => {
+    const draft = customDrafts[participant.id];
+    if (draft === undefined) return;
+    const amount = parseFloat(draft);
+    if (Number.isNaN(amount) || amount < 0) return;
+    if ((participant.custom_amount ?? 0) === amount) return;
+
+    try {
+      const response = await fetch('/api/participants', {
+        method: 'PATCH',
+        headers: creatorHeaders(),
+        body: JSON.stringify({ participant_id: participant.id, custom_amount: amount }),
+      });
+      if (response.status === 403) {
+        toast.error('Only the bill creator can set custom amounts');
+        return;
+      }
+      if (!response.ok) throw new Error('Failed to save amount');
+      await fetchBill();
+    } catch (error) {
+      console.error('Error saving custom amount:', error);
+      toast.error('Failed to save amount');
+    }
+  };
+
+  const openEditDialog = () => {
+    if (!bill) return;
+    setEditName(bill.name);
+    setEditItems(items.map((i) => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity })));
+    setEditTax(bill.tax);
+    setEditTipPercent(bill.tip_percent);
+    setEditTipSplit(bill.tip_split || 'proportional');
+    setEditSplitMode(bill.split_mode || 'items');
+    setEditVenmo(bill.venmo_handle || '');
+    setEditCashapp(bill.cashapp_handle || '');
+    setEditPaypal(bill.paypal_handle || '');
+    setShowEditDialog(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!bill) return;
+    if (!editName.trim()) {
+      toast.error('Bill name is required');
+      return;
+    }
+    const validItems = editItems.filter((i) => i.name.trim());
+    if (validItems.length === 0) {
+      toast.error('Keep at least one item');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const response = await fetch(`/api/bills/${bill.id}`, {
+        method: 'PATCH',
+        headers: creatorHeaders(),
+        body: JSON.stringify({
+          name: editName,
+          items: validItems,
+          tax: editTax,
+          tip_percent: editTipPercent,
+          tip_split: editTipSplit,
+          split_mode: editSplitMode,
+          venmo_handle: editVenmo,
+          cashapp_handle: editCashapp,
+          paypal_handle: editPaypal,
+        }),
+      });
+
+      if (response.status === 403) {
+        toast.error('Only the bill creator can edit this');
+        return;
+      }
+      if (!response.ok) throw new Error('Failed to save changes');
+
+      setShowEditDialog(false);
+      toast.success('Bill updated!');
+      await fetchBill();
+    } catch (error) {
+      console.error('Error saving edit:', error);
+      toast.error('Failed to save changes');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDeleteBill = async () => {
+    if (!bill) return;
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/bills/${bill.id}`, {
+        method: 'DELETE',
+        headers: creatorHeaders(),
+      });
+      if (response.status === 403) {
+        toast.error('Only the bill creator can delete this');
+        return;
+      }
+      if (!response.ok) throw new Error('Failed to delete bill');
+
+      // Clean up localStorage
+      const storedBills = JSON.parse(localStorage.getItem('splittr-my-bills') || '[]');
+      localStorage.setItem(
+        'splittr-my-bills',
+        JSON.stringify(storedBills.filter((b: { id: string }) => b.id !== bill.id))
+      );
+      localStorage.removeItem(`splittr-participant-${bill.id}`);
+      localStorage.removeItem(`splittr-creator-token-${bill.id}`);
+
+      toast.success('Bill deleted');
+      router.push('/');
+    } catch (error) {
+      console.error('Error deleting bill:', error);
+      toast.error('Failed to delete bill');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -384,7 +663,7 @@ export default function BillPage() {
   };
 
   // Check if all items are fully claimed (total shares >= quantity for each item)
-  const allItemsClaimed = items.length > 0 && claims.length > 0 && items.every((item) => {
+  const allItemsClaimed = splitMode === 'items' && items.length > 0 && claims.length > 0 && items.every((item) => {
     const totalClaimed = claims
       .filter((c) => c.item_id === item.id)
       .reduce((sum, c) => sum + c.share, 0);
@@ -426,6 +705,21 @@ export default function BillPage() {
   }
 
   const myShare = splits.find((s) => s.participant.id === currentParticipant?.id);
+  const grandTotal = billTotal(bill);
+  const ModeIcon = SPLIT_MODE_META[splitMode].icon;
+
+  // Payment tracking (creator collects, so progress is over everyone else)
+  const payers = participants.filter((p) => !p.is_creator);
+  const paidCount = payers.filter((p) => p.payment_status === 'paid').length;
+  const iAmPaid = currentParticipant?.payment_status === 'paid';
+  const myPaymentOptions =
+    currentParticipant && !currentParticipant.is_creator && myShare && billHasPaymentMethods(bill)
+      ? getPaymentOptions(bill, myShare.total, `Splittr: ${bill.name}`)
+      : [];
+
+  // Custom mode: how much of the bill is assigned so far
+  const assignedTotal = participants.reduce((sum, p) => sum + (p.custom_amount ?? 0), 0);
+  const unassigned = grandTotal - assignedTotal;
 
   return (
     <main className="min-h-screen py-8 pb-36">
@@ -438,7 +732,7 @@ export default function BillPage() {
               className="absolute w-3 h-3 rounded-sm"
               style={{
                 left: `${Math.random() * 100}%`,
-                backgroundColor: ['#60a5fa', '#a78bfa', '#c084fc', '#818cf8', '#38bdf8'][
+                backgroundColor: ['#4ade80', '#facc15', '#fb923c', '#f472b6', '#38bdf8'][
                   Math.floor(Math.random() * 5)
                 ],
                 animation: `confetti-fall ${2 + Math.random() * 2}s linear forwards`,
@@ -460,7 +754,7 @@ export default function BillPage() {
           <CardContent className="py-5">
             <div className="flex justify-between items-start">
               <div>
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <h1 className="text-2xl font-bold">{bill.name}</h1>
                   {bill.status === 'settled' && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400">
@@ -468,12 +762,21 @@ export default function BillPage() {
                       Settled
                     </span>
                   )}
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-white/5 text-white/50 border border-white/10">
+                    <ModeIcon className="h-3 w-3" />
+                    {SPLIT_MODE_META[splitMode].label}
+                  </span>
                 </div>
                 <p className="text-muted-foreground text-sm">
                   Share code: <span className="font-mono font-semibold text-foreground">{bill.short_code}</span>
                 </p>
               </div>
               <div className="flex gap-2">
+                {isCreator && (
+                  <Button variant="outline" size="icon" onClick={openEditDialog} className="transition-smooth hover:scale-105" title="Edit bill">
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                )}
                 <Button variant="outline" size="icon" onClick={handleCopyLink} className="transition-smooth hover:scale-105">
                   {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
                 </Button>
@@ -483,9 +786,23 @@ export default function BillPage() {
               </div>
             </div>
 
-            {/* Settle button - visible to all participants */}
-            {currentParticipant && (
-              <div className="mt-4 pt-4 border-t">
+            {/* Payment progress + settle button (creator only) */}
+            {isCreator && (
+              <div className="mt-4 pt-4 border-t space-y-3">
+                {payers.length > 0 && (
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-muted-foreground">Payments collected</span>
+                      <span className="font-medium">{paidCount} of {payers.length} paid</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        className="h-full bg-green-500/70 transition-all duration-500"
+                        style={{ width: `${payers.length > 0 ? (paidCount / payers.length) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
                 <Button
                   variant={bill.status === 'settled' ? 'outline' : 'default'}
                   size="sm"
@@ -561,23 +878,30 @@ export default function BillPage() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-3">
-              {participants.map((p) => (
-                <div
-                  key={p.id}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-full transition-smooth ${
-                    p.id === currentParticipant?.id
-                      ? 'bg-primary/15 ring-2 ring-primary/30'
-                      : 'bg-muted'
-                  }`}
-                >
-                  <AvatarInitials name={p.name} size="sm" />
-                  <span className="text-sm font-medium">
-                    {p.name}
-                    {p.is_creator && ' ✨'}
-                    {p.id === currentParticipant?.id && ' (you)'}
-                  </span>
-                </div>
-              ))}
+              {participants.map((p) => {
+                const hex = getPersonHex(p.name);
+                const isMe = p.id === currentParticipant?.id;
+                return (
+                  <div
+                    key={p.id}
+                    className="flex items-center gap-2 px-3 py-2 rounded-full transition-smooth"
+                    style={{
+                      backgroundColor: `${hex}1f`,
+                      boxShadow: isMe ? `inset 0 0 0 2px ${hex}99` : undefined,
+                    }}
+                  >
+                    <AvatarInitials name={p.name} size="sm" />
+                    <span className="text-sm font-medium">
+                      {p.name}
+                      {p.is_creator && ' ✨'}
+                      {isMe && ' (you)'}
+                    </span>
+                    {!p.is_creator && p.payment_status === 'paid' && (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -585,17 +909,23 @@ export default function BillPage() {
         {/* Items */}
         <Card className="mb-6 shadow-sm">
           <CardHeader>
-            <CardTitle className="text-lg">What did you have?</CardTitle>
+            <CardTitle className="text-lg">
+              {splitMode === 'items' ? 'What did you have?' : 'On the bill'}
+            </CardTitle>
             <CardDescription>
-              {currentParticipant
-                ? "Tap the items you ordered. If others tap too, you'll split automatically!"
-                : 'Join the bill first, then tap your items.'}
+              {splitMode === 'items'
+                ? currentParticipant
+                  ? "Tap the items you ordered. If others tap too, you'll split automatically!"
+                  : 'Join the bill first, then tap your items.'
+                : splitMode === 'even'
+                ? `The total is split evenly between ${participants.length} ${participants.length === 1 ? 'person' : 'people'}.`
+                : 'The host assigns each person their amount below.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {items.map((item) => {
-              const claimers = getItemClaimers(item.id);
-              const claimedByMe = isItemClaimedByMe(item.id);
+              const claimers = splitMode === 'items' ? getItemClaimers(item.id) : [];
+              const claimedByMe = splitMode === 'items' && isItemClaimedByMe(item.id);
               const myClaimShare = getMyClaimShare(item.id);
               const totalShares = claimers.reduce((sum, c) => sum + c.share, 0);
               const isAnimating = claimingItemId === item.id;
@@ -605,16 +935,33 @@ export default function BillPage() {
                 ? (item.price * item.quantity * myClaimShare) / totalShares
                 : 0;
 
+              // Tint the item with its claimers' colors — shared items blend them
+              const claimerHexes = claimers.map((c) => getPersonHex(c.participant.name));
+              const myHex = currentParticipant ? getPersonHex(currentParticipant.name) : null;
+              const itemStyle: React.CSSProperties = {};
+              if (claimerHexes.length === 1) {
+                itemStyle.backgroundColor = `${claimerHexes[0]}1a`;
+                itemStyle.boxShadow = `inset 0 0 0 ${claimedByMe ? 2 : 1}px ${claimerHexes[0]}${claimedByMe ? '99' : '4d'}`;
+              } else if (claimerHexes.length > 1) {
+                itemStyle.background = `linear-gradient(100deg, ${claimerHexes
+                  .map((hex, i) => `${hex}1f ${(i / (claimerHexes.length - 1)) * 100}%`)
+                  .join(', ')})`;
+                if (claimedByMe && myHex) {
+                  itemStyle.boxShadow = `inset 0 0 0 2px ${myHex}99`;
+                }
+              }
+
               return (
                 <div
                   key={item.id}
-                  className={`p-4 rounded-xl border-2 cursor-pointer transition-smooth ${
+                  className={`p-4 rounded-xl transition-smooth ${
                     isAnimating ? 'animate-claim-pop' : ''
-                  } ${
-                    claimedByMe
-                      ? 'bg-primary/10 border-primary/40 shadow-sm'
-                      : 'border-transparent bg-muted/50 hover:bg-muted hover:border-muted-foreground/20'
+                  } ${claimers.length === 0 ? 'bg-muted/50' : 'shadow-sm'} ${
+                    splitMode === 'items'
+                      ? 'cursor-pointer hover:brightness-125'
+                      : ''
                   }`}
+                  style={itemStyle}
                   onClick={() => handleToggleClaim(item)}
                 >
                   <div className="flex justify-between items-start gap-3">
@@ -651,6 +998,18 @@ export default function BillPage() {
                               ))}
                             </div>
                           )}
+                          {/* Uneven portions on a shared single item (e.g. ⅔ / ⅓ of a pasta) */}
+                          {item.quantity === 1 && totalShares > 0 &&
+                            (claimers.length > 1 || claimers.some((c) => c.share !== 1)) && (
+                            <div className="text-xs text-muted-foreground">
+                              {claimers.map((c, i) => (
+                                <span key={c.participant.id}>
+                                  {c.participant.name}: {formatShare(c.share / totalShares)}
+                                  {i < claimers.length - 1 && ' · '}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -659,15 +1018,34 @@ export default function BillPage() {
                         {formatCurrency(item.price * item.quantity)}
                       </div>
                       {claimedByMe && myClaimShare && (
-                        <div className={`flex items-center justify-end gap-1 mt-1 text-primary text-sm ${isAnimating ? 'animate-claim-check' : ''}`}>
-                          <Check className="h-4 w-4" />
-                          <span>
-                            {item.quantity > 1
-                              ? `${myClaimShare}× = ${formatCurrency(myPortion)}`
-                              : 'Yours'
-                            }
-                          </span>
-                        </div>
+                        <>
+                          <div
+                            className={`flex items-center justify-end gap-1 mt-1 text-sm ${isAnimating ? 'animate-claim-check' : ''}`}
+                            style={{ color: myHex ?? undefined }}
+                          >
+                            <Check className="h-4 w-4" />
+                            <span>
+                              {item.quantity > 1
+                                ? `${myClaimShare}× = ${formatCurrency(myPortion)}`
+                                : claimers.length === 1 && myClaimShare === 1
+                                ? 'Yours'
+                                : `${formatShare(myClaimShare / totalShares)} · ${formatCurrency(myPortion)}`}
+                            </span>
+                          </div>
+                          {item.quantity === 1 && (
+                            <button
+                              type="button"
+                              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-smooth mt-0.5"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPortionPickerItem(item);
+                                setShowPortionPicker(true);
+                              }}
+                            >
+                              adjust my portion
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -693,9 +1071,7 @@ export default function BillPage() {
               <Separator className="my-2" />
               <div className="flex justify-between font-bold text-base">
                 <span>Total</span>
-                <span>
-                  {formatCurrency(bill.subtotal + bill.tax + bill.tip_amount)}
-                </span>
+                <span>{formatCurrency(grandTotal)}</span>
               </div>
             </div>
           </CardContent>
@@ -712,55 +1088,214 @@ export default function BillPage() {
           </Card>
         )}
 
+        {/* Custom mode: unassigned warning for the host */}
+        {splitMode === 'custom' && isCreator && Math.abs(unassigned) > 0.01 && (
+          <Card className="mb-6 shadow-sm border-amber-500/20 bg-amber-500/5">
+            <CardContent className="py-4 text-sm text-amber-300/90">
+              {unassigned > 0
+                ? `${formatCurrency(unassigned)} of the bill is not assigned to anyone yet.`
+                : `Assigned amounts exceed the bill total by ${formatCurrency(-unassigned)}.`}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Pay your share */}
+        {currentParticipant && !currentParticipant.is_creator && myShare && (
+          <Card className="mb-6 shadow-sm border-primary/20">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Wallet className="h-5 w-5 text-primary" />
+                Settle up
+              </CardTitle>
+              <CardDescription>
+                {iAmPaid
+                  ? 'You are marked as paid. Thanks for settling up!'
+                  : creatorParticipant
+                  ? `You owe ${creatorParticipant.name} ${formatCurrency(myShare.total)}.`
+                  : `Your share is ${formatCurrency(myShare.total)}.`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!iAmPaid && myPaymentOptions.length > 0 && (
+                <div className="grid gap-2">
+                  {myPaymentOptions.map((option) => (
+                    <a
+                      key={option.key}
+                      href={option.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between px-4 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-smooth"
+                    >
+                      <span className="flex items-center gap-3">
+                        <span
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                          style={{ backgroundColor: option.color }}
+                        >
+                          {option.label[0]}
+                        </span>
+                        <span>
+                          <span className="font-medium">{option.label}</span>
+                          <span className="text-muted-foreground text-sm ml-2">{option.handle}</span>
+                        </span>
+                      </span>
+                      <span className="flex items-center gap-2 text-sm font-semibold text-primary">
+                        {formatCurrency(myShare.total)}
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              )}
+              {!iAmPaid && myPaymentOptions.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Pay {creatorParticipant?.name || 'the host'} however you usually do, then mark yourself paid.
+                </p>
+              )}
+              <Button
+                variant={iAmPaid ? 'outline' : 'default'}
+                className="w-full transition-smooth"
+                onClick={() => handleTogglePaid(currentParticipant)}
+                disabled={payingParticipantId === currentParticipant.id}
+              >
+                {payingParticipantId === currentParticipant.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : iAmPaid ? (
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                )}
+                {iAmPaid ? 'Undo — not paid yet' : "I've paid my share"}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Split Summary */}
         {splits.length > 0 && (
           <Card className="shadow-sm">
             <CardHeader>
               <CardTitle className="text-lg">Who owes what</CardTitle>
               <CardDescription>
-                Tax and tip are split based on what each person ordered.
+                {splitMode === 'items'
+                  ? bill.tip_split === 'even'
+                    ? 'Tax follows what each person ordered; the tip is split equally.'
+                    : 'Tax and tip are split based on what each person ordered.'
+                  : splitMode === 'even'
+                  ? 'Everyone pays the same share of the total.'
+                  : 'Amounts assigned by the host.'}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {splits.map((split) => (
-                <div
-                  key={split.participant.id}
-                  className={`p-4 rounded-xl transition-smooth ${
-                    split.participant.id === currentParticipant?.id
-                      ? 'bg-primary/10 ring-2 ring-primary/30'
-                      : 'bg-muted/50'
-                  }`}
-                >
-                  <div className="flex justify-between items-center mb-3">
-                    <div className="flex items-center gap-3">
-                      <AvatarInitials name={split.participant.name} size="md" />
-                      <span className="font-medium">
-                        {split.participant.name}
-                        {split.participant.id === currentParticipant?.id && ' (you)'}
-                      </span>
+              {splits.map((split) => {
+                const p = split.participant;
+                const isPaid = !p.is_creator && p.payment_status === 'paid';
+                return (
+                  <div
+                    key={p.id}
+                    className={`p-4 rounded-xl transition-smooth ${
+                      p.id === currentParticipant?.id
+                        ? 'bg-primary/10 ring-2 ring-primary/30'
+                        : 'bg-muted/50'
+                    } ${isPaid ? 'opacity-80' : ''}`}
+                  >
+                    <div className="flex justify-between items-center mb-1">
+                      <div className="flex items-center gap-3">
+                        <AvatarInitials name={p.name} size="md" />
+                        <span className="font-medium">
+                          {p.name}
+                          {p.id === currentParticipant?.id && ' (you)'}
+                        </span>
+                        {isPaid && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Paid
+                          </span>
+                        )}
+                      </div>
+                      {splitMode === 'custom' && isCreator ? (
+                        <div className="flex items-center gap-1">
+                          <span className="text-muted-foreground text-sm">$</span>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className="w-24 text-right font-semibold"
+                            value={customDrafts[p.id] ?? (p.custom_amount != null ? String(p.custom_amount) : '')}
+                            placeholder="0.00"
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) =>
+                              setCustomDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
+                            }
+                            onBlur={() => handleSaveCustomAmount(p)}
+                            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-2xl font-money" style={{ color: getPersonHex(p.name) }}>
+                          {formatCurrency(split.total)}
+                        </span>
+                      )}
                     </div>
-                    <span className="text-2xl font-bold text-primary">
-                      {formatCurrency(split.total)}
-                    </span>
+                    {splitMode === 'items' && (
+                      <div className="text-sm text-muted-foreground space-y-1 pl-11 mt-2">
+                        <div className="flex justify-between">
+                          <span>{split.items.length} item{split.items.length !== 1 && 's'}</span>
+                          <span>{formatCurrency(split.itemsTotal)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>+ tax</span>
+                          <span>{formatCurrency(split.taxShare)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>+ tip</span>
+                          <span>{formatCurrency(split.tipShare)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Creator can toggle anyone's paid status */}
+                    {isCreator && !p.is_creator && (
+                      <div className="pl-11 mt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          disabled={payingParticipantId === p.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleTogglePaid(p);
+                          }}
+                        >
+                          {payingParticipantId === p.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                          ) : isPaid ? (
+                            <RotateCcw className="h-3 w-3 mr-1" />
+                          ) : (
+                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                          )}
+                          {isPaid ? 'Mark unpaid' : 'Mark paid'}
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                  <div className="text-sm text-muted-foreground space-y-1 pl-11">
-                    <div className="flex justify-between">
-                      <span>{split.items.length} item{split.items.length !== 1 && 's'}</span>
-                      <span>{formatCurrency(split.itemsTotal)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>+ tax</span>
-                      <span>{formatCurrency(split.taxShare)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>+ tip</span>
-                      <span>{formatCurrency(split.tipShare)}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </CardContent>
           </Card>
+        )}
+
+        {/* Danger zone for creator */}
+        {isCreator && (
+          <div className="mt-6 text-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive/70 hover:text-destructive hover:bg-destructive/10"
+              onClick={() => setShowDeleteDialog(true)}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete this bill
+            </Button>
+          </div>
         )}
 
         {/* Fixed bottom bar for current user */}
@@ -770,15 +1305,28 @@ export default function BillPage() {
               <div className="flex justify-between items-center">
                 <div>
                   <div className="text-sm text-muted-foreground">Your total</div>
-                  <div className="text-3xl font-bold text-primary">{formatCurrency(myShare.total)}</div>
+                  <div className="text-4xl font-money text-primary">{formatCurrency(myShare.total)}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm text-muted-foreground">
-                    {myShare.items.length} item{myShare.items.length !== 1 && 's'}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    + {formatCurrency(myShare.taxShare + myShare.tipShare)} tax & tip
-                  </div>
+                  {splitMode === 'items' ? (
+                    <>
+                      <div className="text-sm text-muted-foreground">
+                        {myShare.items.length} item{myShare.items.length !== 1 && 's'}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        + {formatCurrency(myShare.taxShare + myShare.tipShare)} tax & tip
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      {splitMode === 'even' ? `Split ${participants.length} ways` : 'Assigned by host'}
+                    </div>
+                  )}
+                  {!currentParticipant.is_creator && iAmPaid && (
+                    <div className="text-sm text-green-400 flex items-center justify-end gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Paid
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -819,6 +1367,272 @@ export default function BillPage() {
             <p className="text-sm text-muted-foreground text-center mt-2">
               {quantityPickerItem && formatCurrency(quantityPickerItem.price)} each
             </p>
+          </DialogContent>
+        </Dialog>
+
+        {/* Portion Picker Dialog (uneven splits of a shared item) */}
+        <Dialog open={showPortionPicker} onOpenChange={setShowPortionPicker}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>How much did you have?</DialogTitle>
+              <DialogDescription>
+                {portionPickerItem && (
+                  <>
+                    {portionPickerItem.name} — {formatCurrency(portionPickerItem.price)}.
+                    Everyone&apos;s portions are balanced against each other, so pick your true share.
+                  </>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-3 gap-3 pt-4">
+              {[
+                { label: '¼', value: 0.25 },
+                { label: '⅓', value: 1 / 3 },
+                { label: '½', value: 0.5 },
+                { label: '⅔', value: 2 / 3 },
+                { label: '¾', value: 0.75 },
+                { label: 'All / equal', value: 1 },
+              ].map((portion) => (
+                <Button
+                  key={portion.label}
+                  variant="outline"
+                  className="h-16 text-lg font-semibold transition-smooth hover:scale-105 hover:bg-primary hover:text-primary-foreground rounded-xl"
+                  onClick={() => handlePortionClaim(Math.round(portion.value * 100) / 100)}
+                >
+                  {portion.label}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground text-center mt-2">
+              Example: you had ⅔ of the pasta, your friend had ⅓ — you each pick your share and
+              the split follows.
+            </p>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Bill Dialog */}
+        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+          <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Bill</DialogTitle>
+              <DialogDescription>
+                Update items, amounts, split mode, and payment details.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label htmlFor="editBillName">Bill name</Label>
+                <Input
+                  id="editBillName"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Items</Label>
+                {editItems.map((item, index) => (
+                  <div key={item.id ?? `new-${index}`} className="flex gap-1 items-center">
+                    <Input
+                      placeholder="Item name"
+                      value={item.name}
+                      onChange={(e) => {
+                        const next = [...editItems];
+                        next[index] = { ...next[index], name: e.target.value };
+                        setEditItems(next);
+                      }}
+                      className="flex-1 text-sm"
+                    />
+                    <Input
+                      type="number"
+                      min="1"
+                      value={item.quantity}
+                      onChange={(e) => {
+                        const next = [...editItems];
+                        next[index] = { ...next[index], quantity: parseInt(e.target.value) || 1 };
+                        setEditItems(next);
+                      }}
+                      className="w-14 text-center text-sm shrink-0"
+                    />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={item.price || ''}
+                      placeholder="0.00"
+                      onChange={(e) => {
+                        const next = [...editItems];
+                        next[index] = { ...next[index], price: parseFloat(e.target.value) || 0 };
+                        setEditItems(next);
+                      }}
+                      className="w-20 text-sm shrink-0"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0"
+                      onClick={() => setEditItems(editItems.filter((_, i) => i !== index))}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => setEditItems([...editItems, { name: '', price: 0, quantity: 1 }])}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add item
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Removing an item also removes everyone&apos;s claims on it.
+                </p>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="space-y-2 flex-1">
+                  <Label htmlFor="editTax">Tax</Label>
+                  <Input
+                    id="editTax"
+                    type="number"
+                    step="0.01"
+                    value={editTax || ''}
+                    onChange={(e) => setEditTax(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+                <div className="space-y-2 flex-1">
+                  <Label htmlFor="editTip">Tip %</Label>
+                  <Input
+                    id="editTip"
+                    type="number"
+                    step="1"
+                    value={editTipPercent || ''}
+                    onChange={(e) => setEditTipPercent(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Tip split</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditTipSplit('proportional')}
+                    className={`p-2 rounded-full border text-sm transition-smooth ${
+                      editTipSplit === 'proportional'
+                        ? 'border-primary/60 bg-primary/10'
+                        : 'border-white/10 bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    Follows items
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditTipSplit('even')}
+                    className={`p-2 rounded-full border text-sm transition-smooth ${
+                      editTipSplit === 'even'
+                        ? 'border-primary/60 bg-primary/10'
+                        : 'border-white/10 bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    Split equally
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Split mode</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(Object.keys(SPLIT_MODE_META) as SplitMode[]).map((mode) => {
+                    const Icon = SPLIT_MODE_META[mode].icon;
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setEditSplitMode(mode)}
+                        className={`p-2 rounded-lg border text-sm flex items-center justify-center gap-1.5 transition-smooth ${
+                          editSplitMode === mode
+                            ? 'border-primary/60 bg-primary/10'
+                            : 'border-white/10 bg-white/5 hover:bg-white/10'
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {SPLIT_MODE_META[mode].label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Label>Payment handles</Label>
+                <Input
+                  placeholder="Venmo — @your-venmo"
+                  value={editVenmo}
+                  onChange={(e) => setEditVenmo(e.target.value)}
+                />
+                <Input
+                  placeholder="Cash App — $yourcashtag"
+                  value={editCashapp}
+                  onChange={(e) => setEditCashapp(e.target.value)}
+                />
+                <Input
+                  placeholder="PayPal.Me — yourpaypalme"
+                  value={editPaypal}
+                  onChange={(e) => setEditPaypal(e.target.value)}
+                />
+              </div>
+
+              <Button className="w-full" size="lg" onClick={handleSaveEdit} disabled={isSavingEdit}>
+                {isSavingEdit ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save changes'
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Bill Dialog */}
+        <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete this bill?</DialogTitle>
+              <DialogDescription>
+                This permanently removes {`"${bill.name}"`} along with all items, participants, and
+                claims. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setShowDeleteDialog(false)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={handleDeleteBill}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete bill'
+                )}
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
 

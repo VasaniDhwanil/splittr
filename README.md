@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Splittr
 
-## Getting Started
+Split bills effortlessly. Scan a receipt, share a link, everyone picks what they ordered — no app download, no forced signup.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **AI receipt scanning** — photograph or upload a receipt; Claude Vision extracts items, quantities, prices, and tax automatically. Manual entry and "just split a total" also supported.
+- **Three split modes**
+  - **By item** — everyone taps what they ordered; shared items split automatically, multi-quantity items support per-unit claiming.
+  - **Evenly** — the total divided equally among participants.
+  - **Custom amounts** — the host assigns each person their share.
+- **Fair tax & tip** — split proportionally to what each person ordered (item mode) or equally (even mode).
+- **Settle up** — the host adds Venmo / Cash App / PayPal handles; everyone gets one-tap payment links for their exact share, marks themselves paid, and the host sees a payment progress bar.
+- **Groups** — signed-in users can group bills (roommates, trips, events) and see running balances per person across all bills in the group.
+- **Bill management** — hosts can edit items/tax/tip/split mode/payment handles after creation, mark bills settled, and delete bills.
+- **Real-time** — claims, joins, edits, and payments update live via Supabase Realtime.
+- **Progressive auth** — everything works anonymously (creator tokens in localStorage); sign in with a magic link to access bills from any device and unlock groups.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Stack
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- [Next.js 16](https://nextjs.org) (App Router) + React 19 + TypeScript
+- [Supabase](https://supabase.com) — Postgres, Auth (magic links), Realtime
+- [Anthropic API](https://docs.anthropic.com) — Claude Vision receipt scanning
+- Tailwind CSS v4 + shadcn/ui
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Setup
 
-## Learn More
+1. **Install dependencies** (Node 20+):
 
-To learn more about Next.js, take a look at the following resources:
+   ```bash
+   npm install
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+2. **Environment** — create `.env.local`:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=<your supabase project url>
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=<your supabase anon key>
+   ANTHROPIC_API_KEY=<your anthropic api key>
+   ```
 
-## Deploy on Vercel
+3. **Database** — run the migrations in `supabase/migrations/` in order (via the Supabase SQL editor or CLI):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+   - `001_initial_schema.sql` — bills, items, participants, claims
+   - `002_progressive_auth.sql` — creator tokens + account linking
+   - `003_split_modes_payments_groups.sql` — split modes, payments/settle-up, groups
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+4. **Run**:
+
+   ```bash
+   npm run dev
+   ```
+
+## How it works
+
+1. **Create** — scan a receipt (or enter items / a total), pick a split mode, optionally add payment handles and a group.
+2. **Share** — send the link or 6-character code to the table.
+3. **Claim** — everyone joins with just a name and taps their items (item mode), or sees their equal/assigned share.
+4. **Settle** — each person pays via the one-tap links and marks themselves paid; the host tracks progress and marks the bill settled.

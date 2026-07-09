@@ -8,28 +8,50 @@ interface AvatarInitialsProps {
   className?: string;
 }
 
-// Generate a consistent color based on name
-function getAvatarColor(name: string): string {
-  const colors = [
-    'bg-teal-500 text-white',
-    'bg-emerald-500 text-white',
-    'bg-cyan-500 text-white',
-    'bg-sky-500 text-white',
-    'bg-violet-500 text-white',
-    'bg-fuchsia-500 text-white',
-    'bg-rose-500 text-white',
-    'bg-orange-500 text-white',
-    'bg-amber-500 text-white',
-    'bg-lime-500 text-white',
-  ];
+// Sticker-bright palette — every person gets a vivid chip color.
+// Class and hex entries are index-aligned so avatars, item tints, and
+// amounts all agree on a person's color.
+const PERSON_CLASSES = [
+  'bg-green-400 text-green-950',
+  'bg-orange-400 text-orange-950',
+  'bg-pink-500 text-white',
+  'bg-purple-500 text-white',
+  'bg-yellow-400 text-yellow-950',
+  'bg-sky-400 text-sky-950',
+  'bg-lime-400 text-lime-950',
+  'bg-rose-500 text-white',
+  'bg-fuchsia-500 text-white',
+  'bg-amber-400 text-amber-950',
+];
 
-  // Simple hash based on name
+const PERSON_HEXES = [
+  '#4ade80', // green
+  '#fb923c', // orange
+  '#ec4899', // pink
+  '#a855f7', // purple
+  '#facc15', // yellow
+  '#38bdf8', // sky
+  '#a3e635', // lime
+  '#f43f5e', // rose
+  '#d946ef', // fuchsia
+  '#fbbf24', // amber
+];
+
+function nameHash(name: string): number {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
+  return Math.abs(hash);
+}
 
-  return colors[Math.abs(hash) % colors.length];
+function getAvatarColor(name: string): string {
+  return PERSON_CLASSES[nameHash(name) % PERSON_CLASSES.length];
+}
+
+// The person's color as a hex value, for tinting items and amounts
+export function getPersonHex(name: string): string {
+  return PERSON_HEXES[nameHash(name) % PERSON_HEXES.length];
 }
 
 function getInitials(name: string): string {
