@@ -119,6 +119,12 @@ export async function POST(request: NextRequest) {
       finalName = `${name.trim()} (${count + 1})`;
     }
 
+    // Link the participant to their account when they're signed in, so
+    // group balances can track them across bills
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     // Create new participant
     const { data: participant, error } = await supabase
       .from('participants')
@@ -126,6 +132,7 @@ export async function POST(request: NextRequest) {
         bill_id,
         name: finalName,
         is_creator: false,
+        ...(user ? { user_id: user.id } : {}),
       })
       .select()
       .single();

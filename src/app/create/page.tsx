@@ -72,16 +72,30 @@ export default function CreatePage() {
       // ignore bad localStorage
     }
 
-    const loadGroups = async () => {
+    const loadAccount = async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const res = await fetch('/api/groups');
-      if (res.ok) {
-        setGroups(await res.json());
+      const [groupsRes, profileRes] = await Promise.all([
+        fetch('/api/groups'),
+        fetch('/api/profile'),
+      ]);
+      if (groupsRes.ok) {
+        setGroups(await groupsRes.json());
+      }
+      if (profileRes.ok) {
+        // Smart pay: profile handles beat whatever the last bill used
+        const profile = await profileRes.json();
+        if (profile.display_name) setCreatorName((prev) => prev || profile.display_name);
+        if (profile.venmo_handle) setVenmoHandle(profile.venmo_handle);
+        if (profile.cashapp_handle) setCashappHandle(profile.cashapp_handle);
+        if (profile.paypal_handle) setPaypalHandle(profile.paypal_handle);
+        if (profile.venmo_handle || profile.cashapp_handle || profile.paypal_handle) {
+          setShowPayment(true);
+        }
       }
     };
-    loadGroups();
+    loadAccount();
   }, []);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -391,9 +405,9 @@ export default function CreatePage() {
                     />
                   </div>
                 </div>
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center gap-2 flex-wrap">
                   <Label htmlFor="tip">Tip %</Label>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap justify-end">
                     {[0, 15, 18, 20, 25].map((pct) => (
                       <Button
                         key={pct}
@@ -411,7 +425,7 @@ export default function CreatePage() {
                   <span>{formatCurrency(tipAmount)}</span>
                 </div>
                 {tipAmount > 0 && (
-                  <div className="flex justify-between items-center">
+                  <div className="flex justify-between items-center gap-2 flex-wrap">
                     <Label>Tip split</Label>
                     <div className="flex gap-2">
                       <Button

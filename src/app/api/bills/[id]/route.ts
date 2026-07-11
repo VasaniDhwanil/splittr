@@ -50,8 +50,27 @@ export async function GET(
       .select('*')
       .in('item_id', itemIds);
 
+    // Smart pay: when the host hasn't set handles on this bill, fall back to
+    // the payment handles configured on their profile
+    let handleFallback: Record<string, string | null> = {};
+    if (bill.creator_user_id && (!bill.venmo_handle || !bill.cashapp_handle || !bill.paypal_handle)) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('venmo_handle, cashapp_handle, paypal_handle')
+        .eq('user_id', bill.creator_user_id)
+        .maybeSingle();
+      if (profile) {
+        handleFallback = {
+          venmo_handle: bill.venmo_handle || profile.venmo_handle,
+          cashapp_handle: bill.cashapp_handle || profile.cashapp_handle,
+          paypal_handle: bill.paypal_handle || profile.paypal_handle,
+        };
+      }
+    }
+
     return NextResponse.json({
       ...bill,
+      ...handleFallback,
       items: items || [],
       participants: participants || [],
       claims: claims || [],

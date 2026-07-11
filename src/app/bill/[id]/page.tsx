@@ -220,17 +220,43 @@ export default function BillPage() {
       )
       .subscribe();
 
-    // Subscribe to claims changes - only for items in this bill
+    // Subscribe to claims changes - only for items in this bill.
+    // DELETE events can't be filtered (their payload only carries the primary
+    // key), so they get their own unfiltered listener — without it, unclaims
+    // from other devices never refresh the page.
     const claimsChannel = items.length > 0
       ? supabase
           .channel('claims-changes')
           .on(
             'postgres_changes',
             {
-              event: '*',
+              event: 'INSERT',
               schema: 'public',
               table: 'item_claims',
               filter: `item_id=in.(${items.map(i => i.id).join(',')})`,
+            },
+            () => {
+              fetchBill();
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'item_claims',
+              filter: `item_id=in.(${items.map(i => i.id).join(',')})`,
+            },
+            () => {
+              fetchBill();
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'DELETE',
+              schema: 'public',
+              table: 'item_claims',
             },
             () => {
               fetchBill();
@@ -334,7 +360,7 @@ export default function BillPage() {
           method: 'DELETE',
         });
         toast.success("Got it, you're off the hook!");
-        // fetchBill() will be called automatically via realtime subscription
+        await fetchBill(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
       } catch (error) {
         console.error('Error unclaiming:', error);
         toast.error('Oops, something went wrong');
@@ -369,7 +395,7 @@ export default function BillPage() {
         }),
       });
       toast.success('Nice pick!');
-      // fetchBill() will be called automatically via realtime subscription
+      await fetchBill(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
     } catch (error) {
       console.error('Error claiming:', error);
       toast.error('Oops, something went wrong');
@@ -422,7 +448,7 @@ export default function BillPage() {
         }),
       });
       toast.success(`Claimed ${quantity} of ${quantityPickerItem.quantity}!`);
-      // fetchBill() will be called automatically via realtime subscription
+      await fetchBill(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
     } catch (error) {
       console.error('Error claiming:', error);
       toast.error('Oops, something went wrong');
@@ -1035,7 +1061,7 @@ export default function BillPage() {
                           {item.quantity === 1 && (
                             <button
                               type="button"
-                              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-smooth mt-0.5"
+                              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground transition-smooth mt-1 py-1.5 px-2 -mr-2 touch-manipulation"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setPortionPickerItem(item);
@@ -1258,7 +1284,7 @@ export default function BillPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          className="h-9 px-3 text-xs text-muted-foreground hover:text-foreground"
                           disabled={payingParticipantId === p.id}
                           onClick={(e) => {
                             e.stopPropagation();

@@ -1,0 +1,61 @@
+<!--
+  Splittr — Magic Link email template
+  Paste into: Supabase Dashboard → Authentication → Emails → Templates → "Magic Link"
+  Subject line suggestion:  Your Splittr sign-in link
+
+  Supabase template variables used:
+    {{ .ConfirmationURL }}  — the sign-in link (do not rename)
+-->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0a;padding:40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;background:#111111;border:1px solid rgba(255,255,255,0.08);border-radius:16px;overflow:hidden;">
+        <tr>
+          <td style="padding:40px 40px 0 40px;">
+            <div style="font-size:24px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">
+              Split<span style="background:linear-gradient(90deg,#6ee7b7,#4ade80,#bef264);-webkit-background-clip:text;background-clip:text;color:#4ade80;">tr</span>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 40px 8px 40px;">
+            <h1 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;line-height:1.3;">Sign in to Splittr</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 40px 24px 40px;">
+            <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.55);line-height:1.6;">
+              Click the button below to sign in. No password needed — this link is good for one hour.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 40px 8px 40px;">
+            <a href="{{ .ConfirmationURL }}"
+               style="display:block;text-align:center;background:#ffffff;color:#000000;text-decoration:none;font-size:15px;font-weight:600;padding:14px 24px;border-radius:9999px;">
+              Sign in to Splittr
+            </a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 40px 40px 40px;">
+            <p style="margin:0;font-size:12px;color:rgba(255,255,255,0.35);line-height:1.6;">
+              If you didn&rsquo;t request this, you can safely ignore this email.
+            </p>
+            <p style="margin:16px 0 0 0;font-size:12px;color:rgba(255,255,255,0.35);line-height:1.6;word-break:break-all;">
+              Or paste this link into your browser:<br />
+              <a href="{{ .ConfirmationURL }}" style="color:#4ade80;text-decoration:none;">{{ .ConfirmationURL }}</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;">
+        <tr>
+          <td style="padding:20px 40px;text-align:center;">
+            <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.25);">Splittr &middot; Split bills without the awkward math</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { SupabaseClient } from '@supabase/supabase-js';
 
-async function requireGroupOwnership(groupId: string, supabase: SupabaseClient) {
+async function requireGroupAccess(groupId: string, supabase: SupabaseClient) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -16,12 +16,25 @@ async function requireGroupOwnership(groupId: string, supabase: SupabaseClient) 
     .single();
 
   if (!group) return { authorized: false as const, notFound: true };
-  if (group.creator_user_id !== user.id) return { authorized: false as const };
 
-  return { authorized: true as const, group, user };
+  const { data: membership } = await supabase
+    .from('group_members')
+    .select('*')
+    .eq('group_id', groupId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (!membership) return { authorized: false as const };
+
+  return {
+    authorized: true as const,
+    group,
+    user,
+    isOwner: membership.role === 'owner' || group.creator_user_id === user.id,
+  };
 }
 
-// Group detail: the group, its bills (with participants for balances)
+// Group detail: the group, its members (with payment profiles), and its bills
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -30,13 +43,29 @@ export async function GET(
     const { id } = await params;
     const supabase = await createClient();
 
-    const ownership = await requireGroupOwnership(id, supabase);
-    if (ownership.notFound) {
+    const access = await requireGroupAccess(id, supabase);
+    if (access.notFound) {
       return NextResponse.json({ error: 'Group not found' }, { status: 404 });
     }
-    if (!ownership.authorized) {
+    if (!access.authorized) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    const { data: members } = await supabase
+      .from('group_members')
+      .select('*')
+      .eq('group_id', id)
+      .order('created_at', { ascending: true });
+
+    const memberIds = (members || []).map((m) => m.user_id);
+    const { data: profiles } = memberIds.length
+      ? await supabase.from('profiles').select('*').in('user_id', memberIds)
+      : { data: [] };
+
+    const membersWithProfiles = (members || []).map((m) => ({
+      ...m,
+      profile: (profiles || []).find((p) => p.user_id === m.user_id) ?? null,
+    }));
 
     const { data: bills } = await supabase
       .from('bills')
@@ -59,7 +88,13 @@ export async function GET(
       participants: participants.filter((p) => p.bill_id === bill.id),
     }));
 
-    return NextResponse.json({ ...ownership.group, bills: billsWithParticipants });
+    return NextResponse.json({
+      ...access.group,
+      is_owner: access.isOwner,
+      me: access.user.id,
+      members: membersWithProfiles,
+      bills: billsWithParticipants,
+    });
   } catch (error) {
     console.error('Error in group GET:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -74,12 +109,12 @@ export async function PATCH(
     const { id } = await params;
     const supabase = await createClient();
 
-    const ownership = await requireGroupOwnership(id, supabase);
-    if (ownership.notFound) {
+    const access = await requireGroupAccess(id, supabase);
+    if (access.notFound) {
       return NextResponse.json({ error: 'Group not found' }, { status: 404 });
     }
-    if (!ownership.authorized) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!access.authorized || !access.isOwner) {
+      return NextResponse.json({ error: 'Only the group owner can edit it' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -118,12 +153,12 @@ export async function DELETE(
     const { id } = await params;
     const supabase = await createClient();
 
-    const ownership = await requireGroupOwnership(id, supabase);
-    if (ownership.notFound) {
+    const access = await requireGroupAccess(id, supabase);
+    if (access.notFound) {
       return NextResponse.json({ error: 'Group not found' }, { status: 404 });
     }
-    if (!ownership.authorized) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!access.authorized || !access.isOwner) {
+      return NextResponse.json({ error: 'Only the group owner can delete it' }, { status: 403 });
     }
 
     const { error } = await supabase.from('groups').delete().eq('id', id);

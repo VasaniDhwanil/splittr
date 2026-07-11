@@ -20,6 +20,7 @@ export default function SignInPage() {
 
 function SignInForm() {
   const searchParams = useSearchParams();
+  const next = searchParams.get('next') || '/';
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -40,7 +41,7 @@ function SignInForm() {
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
         },
       });
 

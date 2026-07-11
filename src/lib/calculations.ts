@@ -1,9 +1,9 @@
 import { Bill, BillItem, Participant, ItemClaim, ParticipantSplit } from '@/types';
 
-export function generateShortCode(): string {
+export function generateShortCode(length = 6): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing chars (0,O,1,I)
   let code = '';
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < length; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return code;

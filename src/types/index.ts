@@ -56,7 +56,26 @@ export interface Group {
   name: string;
   emoji: string;
   creator_user_id: string;
+  invite_code?: string | null;
   created_at: string;
+}
+
+export interface Profile {
+  user_id: string;
+  display_name: string | null;
+  venmo_handle: string | null;
+  cashapp_handle: string | null;
+  paypal_handle: string | null;
+}
+
+export interface GroupMember {
+  id: string;
+  group_id: string;
+  user_id: string;
+  display_name: string;
+  role: 'owner' | 'member';
+  created_at: string;
+  profile?: Profile | null;
 }
 
 export interface GroupWithBills extends Group {

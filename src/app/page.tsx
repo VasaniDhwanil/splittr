@@ -295,12 +295,14 @@ export default function Home() {
         <div className="flex justify-end mb-8">
           {user ? (
             <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-4 py-2 backdrop-blur-sm">
-              <span className="text-sm text-white/60">{user.email}</span>
+              <Link href="/profile" className="text-sm text-white/60 hover:text-white transition-smooth">
+                {user.email}
+              </Link>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleSignOut}
-                className="text-white/60 hover:text-white h-7 px-2"
+                className="text-white/60 hover:text-white h-9 px-2"
               >
                 Sign out
               </Button>
@@ -432,7 +434,7 @@ export default function Home() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-white/40 hover:text-white"
+                                className="h-9 w-9 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-white/40 hover:text-white"
                                 onClick={(e) => handleUnhideBill(e, bill.id)}
                                 title="Restore bill"
                               >
@@ -442,7 +444,7 @@ export default function Home() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-white/40 hover:text-white"
+                                className="h-9 w-9 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-white/40 hover:text-white"
                                 onClick={(e) => handleHideBill(e, bill.id)}
                                 title="Archive bill"
                               >
@@ -635,7 +637,7 @@ export default function Home() {
                     key={emoji}
                     type="button"
                     onClick={() => setNewGroupEmoji(emoji)}
-                    className={`w-10 h-10 rounded-lg text-xl flex items-center justify-center border transition-smooth ${
+                    className={`w-11 h-11 rounded-xl text-xl flex items-center justify-center border transition-smooth ${
                       newGroupEmoji === emoji
                         ? 'border-white/60 bg-white/10'
                         : 'border-white/10 bg-white/5 hover:bg-white/10'

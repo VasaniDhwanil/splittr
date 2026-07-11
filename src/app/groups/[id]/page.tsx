@@ -26,23 +26,24 @@ import {
   Clock,
   Receipt,
   Plus,
+  UserPlus,
+  Copy,
+  ExternalLink,
+  Scale,
+  Users,
 } from 'lucide-react';
-import { formatCurrency, calculateSplits, billTotal } from '@/lib/calculations';
-import { Bill, BillItem, Participant, ItemClaim, GroupWithBills } from '@/types';
-import { AvatarInitials } from '@/components/avatar-initials';
+import { formatCurrency, billTotal } from '@/lib/calculations';
+import { computeGroupLedger, netBalancesFor, NetBalance } from '@/lib/balances';
+import type { BillDetail } from '@/lib/balances';
+import { getPaymentOptions } from '@/lib/payment-links';
+import { Group, GroupMember, BillWithParticipants } from '@/types';
+import { AvatarInitials, getPersonHex } from '@/components/avatar-initials';
 
-interface PersonBalance {
-  name: string;
-  isCreator: boolean;
-  total: number;
-  paid: number;
-  billCount: number;
-}
-
-interface BillDetail extends Bill {
-  items: BillItem[];
-  participants: Participant[];
-  claims: ItemClaim[];
+interface GroupDetail extends Group {
+  is_owner: boolean;
+  me: string;
+  members: GroupMember[];
+  bills: BillWithParticipants[];
 }
 
 export default function GroupPage() {
@@ -51,9 +52,10 @@ export default function GroupPage() {
   const groupId = params.id as string;
 
   const [isLoading, setIsLoading] = useState(true);
-  const [group, setGroup] = useState<GroupWithBills | null>(null);
+  const [group, setGroup] = useState<GroupDetail | null>(null);
   const [unauthorized, setUnauthorized] = useState(false);
-  const [balances, setBalances] = useState<PersonBalance[]>([]);
+  const [myBalances, setMyBalances] = useState<NetBalance[]>([]);
+  const [standings, setStandings] = useState<{ name: string; user_id: string | null; net: number }[]>([]);
 
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -61,6 +63,7 @@ export default function GroupPage() {
   const [emojiValue, setEmojiValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [settlingKey, setSettlingKey] = useState<string | null>(null);
 
   const fetchGroup = useCallback(async () => {
     try {
@@ -70,41 +73,40 @@ export default function GroupPage() {
         return;
       }
       if (!response.ok) throw new Error('Failed to fetch group');
-      const data: GroupWithBills = await response.json();
+      const data: GroupDetail = await response.json();
       setGroup(data);
 
-      // Pull full bill details to compute exact per-person balances
-      const details = await Promise.all(
-        data.bills.map(async (bill) => {
-          const res = await fetch(`/api/bills/${bill.id}`);
-          return res.ok ? ((await res.json()) as BillDetail) : null;
-        })
-      );
+      // Pull full bill details to compute the pairwise ledger
+      const details = (
+        await Promise.all(
+          data.bills.map(async (bill) => {
+            const res = await fetch(`/api/bills/${bill.id}`);
+            return res.ok ? ((await res.json()) as BillDetail) : null;
+          })
+        )
+      ).filter(Boolean) as BillDetail[];
 
-      const byName = new Map<string, PersonBalance>();
-      for (const detail of details) {
-        if (!detail) continue;
-        const splits = calculateSplits(detail, detail.items, detail.participants, detail.claims);
-        for (const split of splits) {
-          const key = split.participant.name.toLowerCase();
-          const existing = byName.get(key) || {
-            name: split.participant.name,
-            isCreator: false,
-            total: 0,
-            paid: 0,
-            billCount: 0,
-          };
-          existing.total += split.total;
-          existing.billCount += 1;
-          existing.isCreator = existing.isCreator || split.participant.is_creator;
-          if (split.participant.is_creator || split.participant.payment_status === 'paid') {
-            existing.paid += split.total;
-          }
-          byName.set(key, existing);
+      const ledger = computeGroupLedger(details, data.members);
+      setMyBalances(netBalancesFor(ledger, `u:${data.me}`));
+
+      // Overall standings: everyone's net position (owed money on top)
+      const nets = new Map<string, { name: string; user_id: string | null; net: number }>();
+      for (const [fromKey, row] of ledger.debts) {
+        for (const [toKey, amount] of row) {
+          const from = ledger.people.get(fromKey)!;
+          const to = ledger.people.get(toKey)!;
+          const f = nets.get(fromKey) ?? { name: from.name, user_id: from.user_id, net: 0 };
+          f.net += amount; // owes
+          nets.set(fromKey, f);
+          const t = nets.get(toKey) ?? { name: to.name, user_id: to.user_id, net: 0 };
+          t.net -= amount; // is owed
+          nets.set(toKey, t);
         }
       }
-      setBalances(
-        [...byName.values()].sort((a, b) => (b.total - b.paid) - (a.total - a.paid))
+      setStandings(
+        [...nets.values()]
+          .filter((n) => Math.abs(n.net) >= 0.01)
+          .sort((a, b) => a.net - b.net) // most-owed (negative) first
       );
     } catch (error) {
       console.error('Error fetching group:', error);
@@ -117,6 +119,35 @@ export default function GroupPage() {
   useEffect(() => {
     fetchGroup();
   }, [fetchGroup]);
+
+  const handleCopyInvite = () => {
+    if (!group?.invite_code) return;
+    const url = `${window.location.origin}/groups/join?code=${group.invite_code}`;
+    navigator.clipboard.writeText(url);
+    toast.success('Invite link copied — send it to your people!');
+  };
+
+  const handleSettle = async (balance: NetBalance) => {
+    setSettlingKey(balance.counterparty.key);
+    try {
+      const res = await fetch(`/api/groups/${groupId}/settle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          balance.counterparty.user_id
+            ? { counterparty_user_id: balance.counterparty.user_id }
+            : { counterparty_name: balance.counterparty.name }
+        ),
+      });
+      if (!res.ok) throw new Error('Failed to settle');
+      toast.success(`Settled up with ${balance.counterparty.name} 🎉`);
+      await fetchGroup();
+    } catch {
+      toast.error('Failed to settle');
+    } finally {
+      setSettlingKey(null);
+    }
+  };
 
   const handleRename = async () => {
     if (!renameValue.trim()) return;
@@ -178,7 +209,7 @@ export default function GroupPage() {
               <p className="text-muted-foreground mb-6">
                 {unauthorized
                   ? 'Groups are tied to your account. Sign in to view this group.'
-                  : "This group doesn't exist or belongs to another account."}
+                  : "This group doesn't exist or you're not a member."}
               </p>
               <Link href={unauthorized ? '/signin' : '/'}>
                 <Button size="lg">{unauthorized ? 'Sign in' : 'Back to Home'}</Button>
@@ -192,6 +223,8 @@ export default function GroupPage() {
 
   const totalSpend = group.bills.reduce((sum, b) => sum + billTotal(b), 0);
   const activeBills = group.bills.filter((b) => b.status === 'active');
+  const iOwe = myBalances.filter((b) => b.amount > 0);
+  const owedToMe = myBalances.filter((b) => b.amount < 0);
 
   return (
     <main className="min-h-screen py-8">
@@ -204,16 +237,17 @@ export default function GroupPage() {
         {/* Group Header */}
         <Card className="mb-6 shadow-sm">
           <CardContent className="py-5">
-            <div className="flex justify-between items-start">
+            <div className="flex justify-between items-start gap-3 flex-wrap">
               <div>
                 <h1 className="text-2xl font-bold flex items-center gap-2">
                   <span className="text-3xl">{group.emoji}</span>
                   {group.name}
                 </h1>
                 <p className="text-muted-foreground text-sm mt-1">
+                  {group.members.length} member{group.members.length !== 1 && 's'} ·{' '}
                   {group.bills.length} bill{group.bills.length !== 1 && 's'} ·{' '}
                   {formatCurrency(totalSpend)} total
-                  {activeBills.length > 0 && ` · ${activeBills.length} still active`}
+                  {activeBills.length > 0 && ` · ${activeBills.length} active`}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -221,78 +255,235 @@ export default function GroupPage() {
                   variant="outline"
                   size="icon"
                   className="transition-smooth hover:scale-105"
-                  title="Edit group"
-                  onClick={() => {
-                    setRenameValue(group.name);
-                    setEmojiValue(group.emoji);
-                    setShowRenameDialog(true);
-                  }}
+                  title="Copy invite link"
+                  onClick={handleCopyInvite}
                 >
-                  <Pencil className="h-4 w-4" />
+                  <UserPlus className="h-4 w-4" />
                 </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="transition-smooth hover:scale-105 text-destructive/70 hover:text-destructive"
-                  title="Delete group"
-                  onClick={() => setShowDeleteDialog(true)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {group.is_owner && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="transition-smooth hover:scale-105"
+                      title="Edit group"
+                      onClick={() => {
+                        setRenameValue(group.name);
+                        setEmojiValue(group.emoji);
+                        setShowRenameDialog(true);
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="transition-smooth hover:scale-105 text-destructive/70 hover:text-destructive"
+                      title="Delete group"
+                      onClick={() => setShowDeleteDialog(true)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
+            <Button variant="outline" size="sm" className="mt-4 w-full" onClick={handleCopyInvite}>
+              <Copy className="h-4 w-4 mr-2" />
+              Copy invite link
+            </Button>
           </CardContent>
         </Card>
 
-        {/* Balances */}
-        {balances.length > 0 && (
-          <Card className="mb-6 shadow-sm">
+        {/* Your balances — the Splitwise view */}
+        {myBalances.length > 0 && (
+          <Card className="mb-6 shadow-sm border-primary/20">
             <CardHeader>
-              <CardTitle className="text-lg">Running balances</CardTitle>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Scale className="h-5 w-5 text-primary" />
+                Your balances
+              </CardTitle>
               <CardDescription>
-                Totals across every bill in this group. Hosts&apos; own shares count as paid.
+                Netted across every bill in this group. Settling clears the whole balance
+                between you and that person.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {balances.map((person) => {
-                const outstanding = person.total - person.paid;
+              {[...iOwe, ...owedToMe].map((balance) => {
+                const person = balance.counterparty;
+                const member = group.members.find((m) => m.user_id === person.user_id);
+                const payOptions =
+                  balance.amount > 0 && member?.profile
+                    ? getPaymentOptions(member.profile, balance.amount, `Splittr: ${group.name}`)
+                    : [];
                 return (
-                  <div
-                    key={person.name}
-                    className="flex items-center justify-between p-3 rounded-xl bg-muted/50"
-                  >
-                    <div className="flex items-center gap-3">
-                      <AvatarInitials name={person.name} size="md" />
-                      <div>
-                        <div className="font-medium">
-                          {person.name}
-                          {person.isCreator && ' ✨'}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {person.billCount} bill{person.billCount !== 1 && 's'} ·{' '}
-                          {formatCurrency(person.total)} total
+                  <div key={person.key} className="p-4 rounded-xl bg-muted/50 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <AvatarInitials name={person.name} size="md" />
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">
+                            {balance.amount > 0 ? (
+                              <>You owe {person.name}</>
+                            ) : (
+                              <>{person.name} owes you</>
+                            )}
+                          </div>
+                          {!person.user_id && (
+                            <div className="text-xs text-muted-foreground">
+                              guest — matched by name
+                            </div>
+                          )}
                         </div>
                       </div>
+                      <span
+                        className="text-xl font-money shrink-0"
+                        style={{ color: balance.amount > 0 ? '#fbbf24' : '#4ade80' }}
+                      >
+                        {formatCurrency(Math.abs(balance.amount))}
+                      </span>
                     </div>
-                    <div className="text-right">
-                      {outstanding > 0.01 ? (
-                        <>
-                          <div className="font-bold text-amber-400">{formatCurrency(outstanding)}</div>
-                          <div className="text-xs text-muted-foreground">outstanding</div>
-                        </>
+
+                    {payOptions.length > 0 && (
+                      <div className="grid gap-2">
+                        {payOptions.map((option) => (
+                          <a
+                            key={option.key}
+                            href={option.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-between px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-smooth text-sm"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                                style={{ backgroundColor: option.color }}
+                              >
+                                {option.label[0]}
+                              </span>
+                              <span className="font-medium">{option.label}</span>
+                              <span className="text-muted-foreground">{option.handle}</span>
+                            </span>
+                            <span className="flex items-center gap-1.5 font-semibold text-primary">
+                              {formatCurrency(balance.amount)}
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    {balance.amount > 0 && payOptions.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {person.name} hasn&apos;t set payment handles on their profile — pay them
+                        however you usually do, then settle up.
+                      </p>
+                    )}
+
+                    <Button
+                      variant={balance.amount > 0 ? 'default' : 'outline'}
+                      size="sm"
+                      className="w-full"
+                      disabled={settlingKey === person.key}
+                      onClick={() => handleSettle(balance)}
+                    >
+                      {settlingKey === person.key ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
                       ) : (
-                        <div className="inline-flex items-center gap-1 text-green-400 text-sm font-medium">
-                          <CheckCircle2 className="h-4 w-4" />
-                          Settled up
-                        </div>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
                       )}
-                    </div>
+                      {balance.amount > 0 ? "I've paid — settle up" : 'Mark as settled'}
+                    </Button>
                   </div>
                 );
               })}
             </CardContent>
           </Card>
         )}
+
+        {/* Group standings — who's owed, who owes */}
+        {standings.length > 0 && (
+          <Card className="mb-6 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-lg">Group standings</CardTitle>
+              <CardDescription>People owed money are on top.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {standings.map((person) => (
+                <div
+                  key={`${person.user_id ?? person.name}`}
+                  className="flex items-center justify-between p-3 rounded-xl bg-muted/50"
+                >
+                  <div className="flex items-center gap-3">
+                    <AvatarInitials name={person.name} size="sm" />
+                    <span className="font-medium text-sm">{person.name}</span>
+                  </div>
+                  {person.net < 0 ? (
+                    <span className="text-sm font-money text-green-400">
+                      gets back {formatCurrency(-person.net)}
+                    </span>
+                  ) : (
+                    <span className="text-sm font-money text-amber-400">
+                      owes {formatCurrency(person.net)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {myBalances.length === 0 && group.bills.length > 0 && (
+          <Card className="mb-6 shadow-sm">
+            <CardContent className="py-6 text-center text-muted-foreground text-sm">
+              <CheckCircle2 className="h-6 w-6 mx-auto mb-2 text-green-400" />
+              You&apos;re all settled up in this group.
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Members */}
+        <Card className="mb-6 shadow-sm">
+          <CardHeader className="pb-3">
+            <div className="flex justify-between items-center">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                Members ({group.members.length})
+              </CardTitle>
+              <Button size="sm" variant="outline" onClick={handleCopyInvite}>
+                <UserPlus className="h-4 w-4 mr-1.5" />
+                Invite
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-3">
+              {group.members.map((member) => {
+                const hex = getPersonHex(member.display_name);
+                const hasPay = Boolean(
+                  member.profile?.venmo_handle ||
+                    member.profile?.cashapp_handle ||
+                    member.profile?.paypal_handle
+                );
+                return (
+                  <div
+                    key={member.id}
+                    className="flex items-center gap-2 px-3 py-2 rounded-full"
+                    style={{ backgroundColor: `${hex}1f` }}
+                    title={hasPay ? 'Payment handles configured' : 'No payment handles yet'}
+                  >
+                    <AvatarInitials name={member.display_name} size="sm" />
+                    <span className="text-sm font-medium">
+                      {member.display_name}
+                      {member.user_id === group.me && ' (you)'}
+                      {member.role === 'owner' && ' ✨'}
+                    </span>
+                    {hasPay && <Receipt className="h-3 w-3 text-green-400" />}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Bills */}
         <div className="mb-4 flex items-center justify-between">
@@ -366,7 +557,7 @@ export default function GroupPage() {
                       key={emoji}
                       type="button"
                       onClick={() => setEmojiValue(emoji)}
-                      className={`w-10 h-10 rounded-lg text-xl flex items-center justify-center border transition-smooth ${
+                      className={`w-11 h-11 rounded-xl text-xl flex items-center justify-center border transition-smooth ${
                         emojiValue === emoji
                           ? 'border-primary/60 bg-primary/10'
                           : 'border-white/10 bg-white/5 hover:bg-white/10'

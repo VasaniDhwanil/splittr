@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { generateShortCode } from '@/lib/calculations';
 
-// List the signed-in user's groups with bill counts and totals
+// List every group the signed-in user belongs to, with bill counts and totals
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -14,10 +15,20 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { data: memberships } = await supabase
+      .from('group_members')
+      .select('group_id, role')
+      .eq('user_id', user.id);
+
+    const groupIds = (memberships ?? []).map((m) => m.group_id);
+    if (groupIds.length === 0) {
+      return NextResponse.json([]);
+    }
+
     const { data: groups, error } = await supabase
       .from('groups')
       .select('*')
-      .eq('creator_user_id', user.id)
+      .in('id', groupIds)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -25,20 +36,22 @@ export async function GET() {
       return NextResponse.json({ error: 'Failed to fetch groups' }, { status: 500 });
     }
 
-    const groupIds = (groups || []).map((g) => g.id);
-    let bills: { group_id: string; subtotal: number; tax: number; tip_amount: number; status: string }[] = [];
-    if (groupIds.length > 0) {
-      const { data } = await supabase
-        .from('bills')
-        .select('group_id, subtotal, tax, tip_amount, status')
-        .in('group_id', groupIds);
-      bills = data || [];
-    }
+    const { data: bills } = await supabase
+      .from('bills')
+      .select('group_id, subtotal, tax, tip_amount, status')
+      .in('group_id', groupIds);
+
+    const { data: memberCounts } = await supabase
+      .from('group_members')
+      .select('group_id')
+      .in('group_id', groupIds);
 
     const result = (groups || []).map((group) => {
-      const groupBills = bills.filter((b) => b.group_id === group.id);
+      const groupBills = (bills || []).filter((b) => b.group_id === group.id);
       return {
         ...group,
+        role: memberships?.find((m) => m.group_id === group.id)?.role ?? 'member',
+        member_count: (memberCounts || []).filter((m) => m.group_id === group.id).length,
         bill_count: groupBills.length,
         total_amount: groupBills.reduce((sum, b) => sum + b.subtotal + b.tax + b.tip_amount, 0),
         active_count: groupBills.filter((b) => b.status === 'active').length,
@@ -74,12 +87,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Group name is required' }, { status: 400 });
     }
 
+    // Unique invite code
+    let invite_code = generateShortCode(8);
+    for (let attempts = 0; attempts < 10; attempts++) {
+      const { data: existing } = await supabase
+        .from('groups')
+        .select('id')
+        .eq('invite_code', invite_code)
+        .maybeSingle();
+      if (!existing) break;
+      invite_code = generateShortCode(8);
+    }
+
     const { data: group, error } = await supabase
       .from('groups')
       .insert({
         name: name.trim(),
         emoji: (typeof emoji === 'string' && emoji.trim()) || '👥',
         creator_user_id: user.id,
+        invite_code,
       })
       .select()
       .single();
@@ -88,6 +114,20 @@ export async function POST(request: NextRequest) {
       console.error('Error creating group:', error);
       return NextResponse.json({ error: 'Failed to create group' }, { status: 500 });
     }
+
+    // Creator becomes the owner member, named from their profile
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('display_name')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    await supabase.from('group_members').insert({
+      group_id: group.id,
+      user_id: user.id,
+      display_name: profile?.display_name || user.email?.split('@')[0] || 'Host',
+      role: 'owner',
+    });
 
     return NextResponse.json(group);
   } catch (error) {

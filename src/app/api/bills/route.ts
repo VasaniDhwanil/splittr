@@ -45,16 +45,16 @@ export async function POST(request: NextRequest) {
     // Resolve signed-in user if present (optional — no error if anonymous)
     const { data: { user } } = await supabase.auth.getUser();
 
-    // A bill can only be filed under a group the signed-in user owns
+    // A bill can be filed under any group the signed-in user is a member of
     let validGroupId: string | null = null;
     if (group_id && user) {
-      const { data: group } = await supabase
-        .from('groups')
+      const { data: membership } = await supabase
+        .from('group_members')
         .select('id')
-        .eq('id', group_id)
-        .eq('creator_user_id', user.id)
-        .single();
-      if (group) validGroupId = group.id;
+        .eq('group_id', group_id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (membership) validGroupId = group_id;
     }
 
     // Generate unique short code
@@ -134,6 +134,7 @@ export async function POST(request: NextRequest) {
         bill_id: bill.id,
         name: creator_name,
         is_creator: true,
+        ...(user ? { user_id: user.id } : {}),
       })
       .select()
       .single();

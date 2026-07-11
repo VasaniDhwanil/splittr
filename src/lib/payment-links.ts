@@ -12,12 +12,18 @@ function cleanHandle(handle: string): string {
   return handle.trim().replace(/^[@$]/, '');
 }
 
-export function getPaymentOptions(bill: Bill, amount: number, note: string): PaymentOption[] {
+export interface PaymentHandles {
+  venmo_handle?: string | null;
+  cashapp_handle?: string | null;
+  paypal_handle?: string | null;
+}
+
+export function getPaymentOptions(source: PaymentHandles, amount: number, note: string): PaymentOption[] {
   const options: PaymentOption[] = [];
   const amt = Math.max(0, amount).toFixed(2);
 
-  if (bill.venmo_handle) {
-    const handle = cleanHandle(bill.venmo_handle);
+  if (source.venmo_handle) {
+    const handle = cleanHandle(source.venmo_handle);
     options.push({
       key: 'venmo',
       label: 'Venmo',
@@ -27,8 +33,8 @@ export function getPaymentOptions(bill: Bill, amount: number, note: string): Pay
     });
   }
 
-  if (bill.cashapp_handle) {
-    const handle = cleanHandle(bill.cashapp_handle);
+  if (source.cashapp_handle) {
+    const handle = cleanHandle(source.cashapp_handle);
     options.push({
       key: 'cashapp',
       label: 'Cash App',
@@ -38,8 +44,8 @@ export function getPaymentOptions(bill: Bill, amount: number, note: string): Pay
     });
   }
 
-  if (bill.paypal_handle) {
-    const handle = cleanHandle(bill.paypal_handle);
+  if (source.paypal_handle) {
+    const handle = cleanHandle(source.paypal_handle);
     options.push({
       key: 'paypal',
       label: 'PayPal',
