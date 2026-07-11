@@ -265,29 +265,26 @@ export default function CreatePage() {
                 className="hidden"
               />
 
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Button
-                  size="lg"
-                  className="flex-1 transition-smooth hover:scale-105"
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isScanning}
+                  className="flex flex-col items-center justify-center gap-3 h-36 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-primary/40 transition-smooth touch-manipulation active:scale-[0.98] disabled:opacity-60"
                 >
-                  {isScanning ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Scanning...
-                    </>
-                  ) : (
-                    <>
-                      <Camera className="mr-2 h-5 w-5" />
-                      Take Photo
-                    </>
-                  )}
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="flex-1 transition-smooth hover:scale-105"
+                  <span className="w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center">
+                    {isScanning ? (
+                      <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                    ) : (
+                      <Camera className="h-6 w-6 text-primary" />
+                    )}
+                  </span>
+                  <span className="font-semibold text-sm">
+                    {isScanning ? 'Scanning…' : 'Take Photo'}
+                  </span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     if (fileInputRef.current) {
                       fileInputRef.current.removeAttribute('capture');
@@ -296,15 +293,18 @@ export default function CreatePage() {
                     }
                   }}
                   disabled={isScanning}
+                  className="flex flex-col items-center justify-center gap-3 h-36 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-primary/40 transition-smooth touch-manipulation active:scale-[0.98] disabled:opacity-60"
                 >
-                  <Upload className="mr-2 h-5 w-5" />
-                  Upload Image
-                </Button>
+                  <span className="w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center">
+                    <Upload className="h-6 w-6 text-primary" />
+                  </span>
+                  <span className="font-semibold text-sm">Upload Image</span>
+                </button>
               </div>
 
               <Separator className="my-6" />
 
-              <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Button variant="outline" onClick={() => setStep('review')}>
                   Enter items manually
                 </Button>

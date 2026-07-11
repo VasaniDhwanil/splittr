@@ -954,26 +954,30 @@ export default function BillPage() {
               const claimedByMe = splitMode === 'items' && isItemClaimedByMe(item.id);
               const myClaimShare = getMyClaimShare(item.id);
               const totalShares = claimers.reduce((sum, c) => sum + c.share, 0);
+              // Portions are absolute until the item is over-claimed (must
+              // match calculateSplits so the list and totals agree)
+              const shareDenominator = Math.max(totalShares, item.quantity);
               const isAnimating = claimingItemId === item.id;
 
               // Calculate my portion of the item
-              const myPortion = myClaimShare && totalShares > 0
-                ? (item.price * item.quantity * myClaimShare) / totalShares
+              const myPortion = myClaimShare && shareDenominator > 0
+                ? (item.price * item.quantity * myClaimShare) / shareDenominator
                 : 0;
 
-              // Tint the item with its claimers' colors — shared items blend them
+              // Tint the item with its claimers' colors — shared items blend
+              // them; the highlight stays light so the blend reads through
               const claimerHexes = claimers.map((c) => getPersonHex(c.participant.name));
               const myHex = currentParticipant ? getPersonHex(currentParticipant.name) : null;
               const itemStyle: React.CSSProperties = {};
               if (claimerHexes.length === 1) {
-                itemStyle.backgroundColor = `${claimerHexes[0]}1a`;
-                itemStyle.boxShadow = `inset 0 0 0 ${claimedByMe ? 2 : 1}px ${claimerHexes[0]}${claimedByMe ? '99' : '4d'}`;
+                itemStyle.backgroundColor = `${claimerHexes[0]}17`;
+                itemStyle.boxShadow = `inset 0 0 0 1.5px ${claimerHexes[0]}${claimedByMe ? '73' : '40'}`;
               } else if (claimerHexes.length > 1) {
                 itemStyle.background = `linear-gradient(100deg, ${claimerHexes
                   .map((hex, i) => `${hex}1f ${(i / (claimerHexes.length - 1)) * 100}%`)
                   .join(', ')})`;
                 if (claimedByMe && myHex) {
-                  itemStyle.boxShadow = `inset 0 0 0 2px ${myHex}99`;
+                  itemStyle.boxShadow = `inset 0 0 0 1.5px ${myHex}59`;
                 }
               }
 
@@ -1030,7 +1034,7 @@ export default function BillPage() {
                             <div className="text-xs text-muted-foreground">
                               {claimers.map((c, i) => (
                                 <span key={c.participant.id}>
-                                  {c.participant.name}: {formatShare(c.share / totalShares)}
+                                  {c.participant.name}: {formatShare(c.share / shareDenominator)}
                                   {i < claimers.length - 1 && ' · '}
                                 </span>
                               ))}
@@ -1055,7 +1059,7 @@ export default function BillPage() {
                                 ? `${myClaimShare}× = ${formatCurrency(myPortion)}`
                                 : claimers.length === 1 && myClaimShare === 1
                                 ? 'Yours'
-                                : `${formatShare(myClaimShare / totalShares)} · ${formatCurrency(myPortion)}`}
+                                : `${formatShare(myClaimShare / shareDenominator)} · ${formatCurrency(myPortion)}`}
                             </span>
                           </div>
                           {item.quantity === 1 && (

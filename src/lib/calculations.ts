@@ -68,9 +68,12 @@ export function calculateSplits(
       const item = items.find(i => i.id === claim.item_id);
       if (!item) continue;
 
-      // Calculate this participant's portion of the item
-      const totalSharesForItem = itemTotalShares[item.id] || 1;
-      const effectiveShare = claim.share / totalSharesForItem;
+      // Shares are absolute portions (½ of a pasta, 2 of 3 beers) until the
+      // item is over-claimed — only then do we normalize the weights. A lone
+      // ½ claim pays half the item, not all of it.
+      const totalSharesForItem = itemTotalShares[item.id] || 0;
+      const denominator = Math.max(totalSharesForItem, item.quantity);
+      const effectiveShare = denominator > 0 ? claim.share / denominator : 0;
       const amount = item.price * item.quantity * effectiveShare;
 
       itemsTotal += amount;
