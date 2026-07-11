@@ -1,16 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { clampNumber, LIMITS } from '@/lib/validate';
 
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
     const body = await request.json();
 
-    const { participant_id, item_id, share = 1.0 } = body;
+    const { participant_id, item_id } = body;
+    const share = clampNumber(body.share ?? 1.0, 0.01, LIMITS.maxShare);
 
     if (!participant_id || !item_id) {
       return NextResponse.json(
         { error: 'participant_id and item_id are required' },
+        { status: 400 }
+      );
+    }
+
+    // The participant and item must belong to the same bill — otherwise any
+    // caller could attach claims across unrelated bills
+    const [{ data: participant }, { data: item }] = await Promise.all([
+      supabase.from('participants').select('bill_id').eq('id', participant_id).maybeSingle(),
+      supabase.from('bill_items').select('bill_id').eq('id', item_id).maybeSingle(),
+    ]);
+
+    if (!participant || !item || participant.bill_id !== item.bill_id) {
+      return NextResponse.json(
+        { error: 'Participant and item do not belong to the same bill' },
         { status: 400 }
       );
     }

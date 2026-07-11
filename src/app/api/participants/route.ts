@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireBillOwnership } from '@/lib/auth-helpers';
+import { cleanText, LIMITS } from '@/lib/validate';
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -82,7 +83,8 @@ export async function POST(request: NextRequest) {
     const supabase = await createClient();
     const body = await request.json();
 
-    const { bill_id, name } = body;
+    const { bill_id } = body;
+    const name = cleanText(body.name, LIMITS.personName);
 
     if (!bill_id || !name) {
       return NextResponse.json(
@@ -102,6 +104,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Bill not found' },
         { status: 404 }
+      );
+    }
+
+    // Bound the table size — nobody splits dinner 50 ways
+    const { count } = await supabase
+      .from('participants')
+      .select('id', { count: 'exact', head: true })
+      .eq('bill_id', bill_id);
+
+    if ((count ?? 0) >= LIMITS.maxParticipants) {
+      return NextResponse.json(
+        { error: 'This bill is full' },
+        { status: 400 }
       );
     }
 

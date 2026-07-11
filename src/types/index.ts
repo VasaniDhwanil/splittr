@@ -110,6 +110,7 @@ export interface ParticipantWithClaims extends Participant {
 
 // For receipt scanning
 export interface ScannedReceipt {
+  is_receipt: boolean;
   items: {
     name: string;
     price: number;

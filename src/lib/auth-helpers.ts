@@ -1,5 +1,14 @@
 import { NextRequest } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 import { SupabaseClient } from '@supabase/supabase-js';
+
+/** Constant-time string comparison so token checks don't leak via timing. */
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 export interface BillOwnershipResult {
   authorized: boolean;
@@ -24,7 +33,7 @@ export async function requireBillOwnership(
 
   // Token-based ownership check (works without an account)
   const tokenFromHeader = request.headers.get('X-Creator-Token');
-  if (tokenFromHeader && tokenFromHeader === bill.creator_token) {
+  if (tokenFromHeader && bill.creator_token && safeEqual(tokenFromHeader, bill.creator_token)) {
     return { authorized: true };
   }
 

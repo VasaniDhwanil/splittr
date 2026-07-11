@@ -2,23 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
 import { createClient } from '@/lib/supabase/server';
 import { generateShortCode } from '@/lib/calculations';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
+import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
 
 export async function POST(request: NextRequest) {
   try {
+    const limit = rateLimit(`bills:${clientIp(request)}`, 20, 10 * 60 * 1000);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: 'Too many bills created — try again in a few minutes' },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } }
+      );
+    }
+
     const supabase = await createClient();
     const body = await request.json();
 
     const {
-      name,
-      items,
-      tax,
-      tip_percent,
-      creator_name,
       split_mode = 'items',
       tip_split = 'proportional',
-      venmo_handle,
-      cashapp_handle,
-      paypal_handle,
       group_id,
     } = body;
 
@@ -29,12 +31,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid tip_split' }, { status: 400 });
     }
 
+    // All user-supplied fields are bounded and cleaned before touching the DB
+    const name = cleanText(body.name, LIMITS.billName);
+    const creator_name = cleanText(body.creator_name, LIMITS.personName);
+    const items = sanitizeItems(body.items);
+    const tax = Math.round(clampNumber(body.tax, 0, LIMITS.maxTax) * 100) / 100;
+    const tip_percent = clampNumber(body.tip_percent, 0, LIMITS.maxTipPercent);
+    const venmo_handle = cleanText(body.venmo_handle, LIMITS.handle) || null;
+    const cashapp_handle = cleanText(body.cashapp_handle, LIMITS.handle) || null;
+    const paypal_handle = cleanText(body.paypal_handle, LIMITS.handle) || null;
+
+    if (!name || !creator_name) {
+      return NextResponse.json({ error: 'Bill name and your name are required' }, { status: 400 });
+    }
+    if (!items) {
+      return NextResponse.json(
+        { error: `A bill needs between 1 and ${LIMITS.maxItems} items` },
+        { status: 400 }
+      );
+    }
+
     // Calculate subtotal from items
-    const subtotal = items.reduce(
-      (sum: number, item: { price: number; quantity: number }) =>
-        sum + item.price * item.quantity,
-      0
-    );
+    const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
     // Calculate tip amount
     const tip_amount = (subtotal + tax) * (tip_percent / 100);
@@ -86,9 +104,9 @@ export async function POST(request: NextRequest) {
         creator_token,
         split_mode,
         tip_split,
-        venmo_handle: venmo_handle?.trim() || null,
-        cashapp_handle: cashapp_handle?.trim() || null,
-        paypal_handle: paypal_handle?.trim() || null,
+        venmo_handle,
+        cashapp_handle,
+        paypal_handle,
         group_id: validGroupId,
         ...(user ? { creator_user_id: user.id } : {}),
       })

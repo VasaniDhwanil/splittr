@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireBillOwnership } from '@/lib/auth-helpers';
+import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
 
 export async function GET(
   request: NextRequest,
@@ -134,10 +135,11 @@ export async function PATCH(
     const updateData: Record<string, unknown> = {};
 
     if (name !== undefined) {
-      if (typeof name !== 'string' || !name.trim()) {
+      const clean = cleanText(name, LIMITS.billName);
+      if (!clean) {
         return NextResponse.json({ error: 'Invalid name' }, { status: 400 });
       }
-      updateData.name = name.trim();
+      updateData.name = clean;
     }
 
     if (status !== undefined) {
@@ -164,16 +166,20 @@ export async function PATCH(
       updateData.tip_split = tip_split;
     }
 
-    if (venmo_handle !== undefined) updateData.venmo_handle = venmo_handle?.trim() || null;
-    if (cashapp_handle !== undefined) updateData.cashapp_handle = cashapp_handle?.trim() || null;
-    if (paypal_handle !== undefined) updateData.paypal_handle = paypal_handle?.trim() || null;
+    if (venmo_handle !== undefined) updateData.venmo_handle = cleanText(venmo_handle, LIMITS.handle) || null;
+    if (cashapp_handle !== undefined) updateData.cashapp_handle = cleanText(cashapp_handle, LIMITS.handle) || null;
+    if (paypal_handle !== undefined) updateData.paypal_handle = cleanText(paypal_handle, LIMITS.handle) || null;
     if (group_id !== undefined) updateData.group_id = group_id || null;
 
     // Sync items if provided: update kept rows (claims survive), insert new, delete removed
     let subtotal = bill.subtotal;
-    if (Array.isArray(items)) {
-      if (items.length === 0) {
-        return NextResponse.json({ error: 'Bill must have at least one item' }, { status: 400 });
+    if (items !== undefined) {
+      const cleanItems = sanitizeItems(items);
+      if (!cleanItems) {
+        return NextResponse.json(
+          { error: `A bill needs between 1 and ${LIMITS.maxItems} items` },
+          { status: 400 }
+        );
       }
 
       const { data: existingItems } = await supabase
@@ -183,15 +189,11 @@ export async function PATCH(
       const existingIds = new Set((existingItems || []).map((i) => i.id));
 
       const keptIds = new Set<string>();
-      for (const item of items) {
-        const clean = {
-          name: String(item.name || '').trim() || 'Item',
-          price: Number(item.price) || 0,
-          quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
-        };
-        if (item.id && existingIds.has(item.id)) {
-          keptIds.add(item.id);
-          await supabase.from('bill_items').update(clean).eq('id', item.id);
+      for (const item of cleanItems) {
+        const { id: itemId, ...clean } = item;
+        if (itemId && existingIds.has(itemId)) {
+          keptIds.add(itemId);
+          await supabase.from('bill_items').update(clean).eq('id', itemId);
         } else {
           await supabase.from('bill_items').insert({ bill_id: id, ...clean });
         }
@@ -202,21 +204,17 @@ export async function PATCH(
         await supabase.from('bill_items').delete().in('id', toDelete);
       }
 
-      subtotal = items.reduce(
-        (sum: number, item: { price: number; quantity: number }) =>
-          sum + (Number(item.price) || 0) * Math.max(1, Math.round(Number(item.quantity) || 1)),
-        0
-      );
+      subtotal = cleanItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
       updateData.subtotal = subtotal;
     }
 
-    const newTax = tax !== undefined ? Number(tax) || 0 : bill.tax;
+    const newTax = tax !== undefined ? Math.round(clampNumber(tax, 0, LIMITS.maxTax) * 100) / 100 : bill.tax;
     if (tax !== undefined) updateData.tax = newTax;
 
     // Recompute tip whenever any of its inputs changed
-    const newTipPercent = tip_percent !== undefined ? Number(tip_percent) || 0 : bill.tip_percent;
+    const newTipPercent = tip_percent !== undefined ? clampNumber(tip_percent, 0, LIMITS.maxTipPercent) : bill.tip_percent;
     if (tip_percent !== undefined) updateData.tip_percent = newTipPercent;
-    if (tip_percent !== undefined || tax !== undefined || Array.isArray(items)) {
+    if (tip_percent !== undefined || tax !== undefined || items !== undefined) {
       updateData.tip_amount = (subtotal + newTax) * (newTipPercent / 100);
     }
 

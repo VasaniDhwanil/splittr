@@ -114,6 +114,19 @@ export default function CreatePage() {
       });
 
       if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 422 || body.code === 'not_a_receipt') {
+          toast.error("That doesn't look like a receipt 🧾", {
+            description: 'Try a clearer photo of the bill — or enter the items manually below.',
+          });
+          return;
+        }
+        if (response.status === 429) {
+          toast.error('Slow down a sec ⏳', {
+            description: body.error || 'Too many scans — try again in a few minutes.',
+          });
+          return;
+        }
         throw new Error('Failed to scan receipt');
       }
 
@@ -128,6 +141,8 @@ export default function CreatePage() {
       toast.error('Failed to scan receipt. Please try again or enter items manually.');
     } finally {
       setIsScanning(false);
+      // allow rescanning the same file
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
