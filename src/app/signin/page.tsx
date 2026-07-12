@@ -26,8 +26,17 @@ function SignInForm() {
   const [sent, setSent] = useState(false);
 
   useEffect(() => {
-    if (searchParams.get('error') === 'auth_failed') {
-      toast.error('Sign-in link expired or invalid. Please try again.');
+    const error = searchParams.get('error');
+    // GoTrue sometimes reports failures in the URL fragment, which never
+    // reaches the server — check both places.
+    const hashExpired =
+      typeof window !== 'undefined' && window.location.hash.includes('otp_expired');
+    if (error === 'otp_expired' || hashExpired) {
+      toast.error(
+        'That sign-in link has expired or was already used. Enter your email and we’ll send a fresh one.'
+      );
+    } else if (error === 'auth_failed') {
+      toast.error('Sign-in didn’t go through. Enter your email to try again.');
     }
   }, [searchParams]);
 

@@ -28,6 +28,8 @@ import {
   Plus,
   UserPlus,
   Copy,
+  Mail,
+  LogOut,
   ExternalLink,
   Scale,
   Users,
@@ -59,11 +61,15 @@ export default function GroupPage() {
 
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showLeaveDialog, setShowLeaveDialog] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [emojiValue, setEmojiValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [settlingKey, setSettlingKey] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [isInviting, setIsInviting] = useState(false);
 
   const fetchGroup = useCallback(async () => {
     try {
@@ -127,6 +133,50 @@ export default function GroupPage() {
     toast.success('Invite link copied — send it to your people!');
   };
 
+  const handleEmailInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // Accept one or more addresses, separated by commas, spaces, or semicolons
+    const emails = Array.from(
+      new Set(
+        inviteEmail
+          .split(/[\s,;]+/)
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    if (!emails.length || isInviting) return;
+    setIsInviting(true);
+    try {
+      const failed: { email: string; reason: string }[] = [];
+      for (const email of emails) {
+        try {
+          const res = await fetch(`/api/groups/${groupId}/invite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) failed.push({ email, reason: data.error || 'send failed' });
+        } catch {
+          failed.push({ email, reason: 'network error' });
+        }
+      }
+      const sent = emails.length - failed.length;
+      if (sent > 0) {
+        toast.success(sent === 1 ? 'Invite sent!' : `Invites sent to ${sent} people`);
+      }
+      if (failed.length > 0) {
+        // Keep the failed addresses in the input so they're easy to retry
+        setInviteEmail(failed.map((f) => f.email).join(', '));
+        toast.error(`Couldn't send to ${failed.map((f) => f.email).join(', ')} — ${failed[0].reason}`);
+      } else {
+        setInviteEmail('');
+      }
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
   const handleSettle = async (balance: NetBalance) => {
     setSettlingKey(balance.counterparty.key);
     try {
@@ -180,6 +230,24 @@ export default function GroupPage() {
       toast.error('Failed to delete group');
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleLeave = async () => {
+    setIsLeaving(true);
+    try {
+      const response = await fetch(`/api/groups/${groupId}/leave`, { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        toast.error(data.error || 'Failed to leave group');
+        return;
+      }
+      toast.success('You left the group');
+      router.push('/');
+    } catch {
+      toast.error('Failed to leave group');
+    } finally {
+      setIsLeaving(false);
     }
   };
 
@@ -286,12 +354,50 @@ export default function GroupPage() {
                     </Button>
                   </>
                 )}
+                {!group.is_owner && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="transition-smooth hover:scale-105 text-destructive/70 hover:text-destructive"
+                    title="Leave group"
+                    onClick={() => setShowLeaveDialog(true)}
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </div>
             <Button variant="outline" size="sm" className="mt-4 w-full" onClick={handleCopyInvite}>
               <Copy className="h-4 w-4 mr-2" />
               Copy invite link
             </Button>
+            <form onSubmit={handleEmailInvite} className="mt-2 flex gap-2">
+              <Input
+                type="text"
+                inputMode="email"
+                autoComplete="off"
+                placeholder="Invite by email — commas for several"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                className="h-9"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                variant="outline"
+                disabled={isInviting || !inviteEmail.trim()}
+                className="shrink-0"
+              >
+                {isInviting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <Mail className="h-4 w-4 mr-2" />
+                    Send
+                  </>
+                )}
+              </Button>
+            </form>
           </CardContent>
         </Card>
 
@@ -606,6 +712,34 @@ export default function GroupPage() {
               <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={isDeleting}>
                 {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Delete group
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Leave Dialog */}
+        <Dialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Leave this group?</DialogTitle>
+              <DialogDescription>
+                {myBalances.length > 0
+                  ? 'You still have unsettled balances here — consider settling up first. Your bill history stays either way.'
+                  : 'You can rejoin later with an invite link. Your bill history stays.'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setShowLeaveDialog(false)}
+                disabled={isLeaving}
+              >
+                Cancel
+              </Button>
+              <Button variant="destructive" className="flex-1" onClick={handleLeave} disabled={isLeaving}>
+                {isLeaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Leave group
               </Button>
             </div>
           </DialogContent>

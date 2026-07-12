@@ -4,7 +4,14 @@
   Subject line suggestion:  Your Splittr sign-in link
 
   Supabase template variables used:
-    {{ .ConfirmationURL }}  — the sign-in link (do not rename)
+    {{ .SiteURL }}    — the app's configured Site URL
+    {{ .TokenHash }}  — one-time token, verified server-side by /auth/callback
+    {{ .RedirectTo }} — the emailRedirectTo the app requested (carries ?next=)
+
+  Why token_hash instead of {{ .ConfirmationURL }}: the confirmation URL relies
+  on PKCE state stored in the requesting browser, so opening the link in a
+  different browser/app fails with "invalid flow state". The token_hash link is
+  verified server-side and works anywhere.
 -->
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0a;padding:40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <tr>
@@ -31,7 +38,7 @@
         </tr>
         <tr>
           <td style="padding:0 40px 8px 40px;">
-            <a href="{{ .ConfirmationURL }}"
+            <a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email&redirect_to={{ .RedirectTo }}"
                style="display:block;text-align:center;background:#ffffff;color:#000000;text-decoration:none;font-size:15px;font-weight:600;padding:14px 24px;border-radius:9999px;">
               Sign in to Splittr
             </a>
@@ -44,7 +51,7 @@
             </p>
             <p style="margin:16px 0 0 0;font-size:12px;color:rgba(255,255,255,0.35);line-height:1.6;word-break:break-all;">
               Or paste this link into your browser:<br />
-              <a href="{{ .ConfirmationURL }}" style="color:#4ade80;text-decoration:none;">{{ .ConfirmationURL }}</a>
+              <a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email&redirect_to={{ .RedirectTo }}" style="color:#4ade80;text-decoration:none;">{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email</a>
             </p>
           </td>
         </tr>
