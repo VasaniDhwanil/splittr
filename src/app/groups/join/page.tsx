@@ -43,16 +43,21 @@ function GroupJoin() {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
+        // Remember the invite so the home page can resume the join if the
+        // sign-in round-trip loses the ?next= redirect.
+        localStorage.setItem('splittr-pending-invite', code);
         setState('signin');
         return;
       }
       const res = await fetch(`/api/groups/join?code=${encodeURIComponent(code)}`);
       if (!res.ok) {
+        localStorage.removeItem('splittr-pending-invite');
         setState('invalid');
         return;
       }
       const data: InvitePreview = await res.json();
       if (data.already_member) {
+        localStorage.removeItem('splittr-pending-invite');
         router.replace(`/groups/${data.id}`);
         return;
       }
@@ -72,6 +77,7 @@ function GroupJoin() {
       });
       if (!res.ok) throw new Error('Failed to join');
       const { group_id, name } = await res.json();
+      localStorage.removeItem('splittr-pending-invite');
       toast.success(`Welcome to ${name}!`);
       router.push(`/groups/${group_id}`);
     } catch {

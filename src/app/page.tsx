@@ -63,6 +63,19 @@ export default function Home() {
   const [newGroupEmoji, setNewGroupEmoji] = useState('👥');
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
 
+  // Safety net: if the user started joining a group but the sign-in flow
+  // dropped them here instead (lost ?next=), send them back to finish it.
+  useEffect(() => {
+    const code = localStorage.getItem('splittr-pending-invite');
+    if (!code) return;
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        window.location.href = `/groups/join?code=${encodeURIComponent(code)}`;
+      }
+    });
+  }, []);
+
   const fetchGroups = async () => {
     const res = await fetch('/api/groups');
     if (res.ok) {
