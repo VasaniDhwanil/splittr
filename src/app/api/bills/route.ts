@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { generateShortCode } from '@/lib/calculations';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
 import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
@@ -15,7 +16,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const body = await request.json();
 
     const {
@@ -66,7 +68,7 @@ export async function POST(request: NextRequest) {
     // A bill can be filed under any group the signed-in user is a member of
     let validGroupId: string | null = null;
     if (group_id && user) {
-      const { data: membership } = await supabase
+      const { data: membership } = await db
         .from('group_members')
         .select('id')
         .eq('group_id', group_id)
@@ -79,7 +81,7 @@ export async function POST(request: NextRequest) {
     let short_code = generateShortCode();
     let attempts = 0;
     while (attempts < 10) {
-      const { data: existing } = await supabase
+      const { data: existing } = await db
         .from('bills')
         .select('id')
         .eq('short_code', short_code)
@@ -91,7 +93,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create the bill
-    const { data: bill, error: billError } = await supabase
+    const { data: bill, error: billError } = await db
       .from('bills')
       .insert({
         name,
@@ -131,14 +133,14 @@ export async function POST(request: NextRequest) {
       })
     );
 
-    const { error: itemsError } = await supabase
+    const { error: itemsError } = await db
       .from('bill_items')
       .insert(itemsToInsert);
 
     if (itemsError) {
       console.error('Error creating bill items:', itemsError);
       // Clean up the bill
-      await supabase.from('bills').delete().eq('id', bill.id);
+      await db.from('bills').delete().eq('id', bill.id);
       return NextResponse.json(
         { error: 'Failed to create bill items' },
         { status: 500 }
@@ -146,7 +148,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create the creator as a participant
-    const { data: creator, error: participantError } = await supabase
+    const { data: creator, error: participantError } = await db
       .from('participants')
       .insert({
         bill_id: bill.id,

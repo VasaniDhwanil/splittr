@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { clampNumber, LIMITS } from '@/lib/validate';
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const body = await request.json();
 
     const { participant_id, item_id } = body;
@@ -20,8 +22,8 @@ export async function POST(request: NextRequest) {
     // The participant and item must belong to the same bill — otherwise any
     // caller could attach claims across unrelated bills
     const [{ data: participant }, { data: item }] = await Promise.all([
-      supabase.from('participants').select('bill_id').eq('id', participant_id).maybeSingle(),
-      supabase.from('bill_items').select('bill_id').eq('id', item_id).maybeSingle(),
+      db.from('participants').select('bill_id').eq('id', participant_id).maybeSingle(),
+      db.from('bill_items').select('bill_id').eq('id', item_id).maybeSingle(),
     ]);
 
     if (!participant || !item || participant.bill_id !== item.bill_id) {
@@ -32,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Upsert the claim (update if exists, insert if not)
-    const { data: claim, error } = await supabase
+    const { data: claim, error } = await db
       .from('item_claims')
       .upsert(
         {
@@ -67,7 +69,8 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const { searchParams } = new URL(request.url);
     const participant_id = searchParams.get('participant_id');
     const item_id = searchParams.get('item_id');
@@ -79,7 +82,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('item_claims')
       .delete()
       .eq('participant_id', participant_id)

@@ -36,6 +36,7 @@ Split bills effortlessly. Scan a receipt, share a link, everyone picks what they
    ```
    NEXT_PUBLIC_SUPABASE_URL=<your supabase project url>
    NEXT_PUBLIC_SUPABASE_ANON_KEY=<your supabase anon key>
+   SUPABASE_SERVICE_ROLE_KEY=<your supabase service_role key — server-only, required once migration 006 is applied>
    ANTHROPIC_API_KEY=<your anthropic api key>
    ```
 

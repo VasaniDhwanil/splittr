@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 // Preview a group by invite code (so the join page can show what you're joining)
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -18,7 +20,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'code is required' }, { status: 400 });
     }
 
-    const { data: group } = await supabase
+    const { data: group } = await db
       .from('groups')
       .select('id, name, emoji, invite_code')
       .eq('invite_code', code)
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invite not found' }, { status: 404 });
     }
 
-    const { data: members } = await supabase
+    const { data: members } = await db
       .from('group_members')
       .select('user_id')
       .eq('group_id', group.id);
@@ -49,7 +51,8 @@ export async function GET(request: NextRequest) {
 // Join a group by invite code
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -64,7 +67,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'invite_code is required' }, { status: 400 });
     }
 
-    const { data: group } = await supabase
+    const { data: group } = await db
       .from('groups')
       .select('id, name')
       .eq('invite_code', code)
@@ -74,13 +77,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invite not found' }, { status: 404 });
     }
 
-    const { data: profile } = await supabase
+    const { data: profile } = await db
       .from('profiles')
       .select('display_name')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    const { error } = await supabase.from('group_members').upsert(
+    const { error } = await db.from('group_members').upsert(
       {
         group_id: group.id,
         user_id: user.id,

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function GET() {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -12,7 +14,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data: profile } = await supabase
+    const { data: profile } = await db
       .from('profiles')
       .select('*')
       .eq('user_id', user.id)
@@ -27,7 +29,8 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -43,7 +46,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Display name cannot be empty' }, { status: 400 });
     }
 
-    const { data: profile, error } = await supabase
+    const { data: profile, error } = await db
       .from('profiles')
       .upsert(
         {
@@ -66,7 +69,7 @@ export async function PUT(request: NextRequest) {
 
     // Keep group member display names in sync with the profile
     if (display_name !== undefined) {
-      await supabase
+      await db
         .from('group_members')
         .update({ display_name: display_name.trim() })
         .eq('user_id', user.id);

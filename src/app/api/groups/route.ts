@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { generateShortCode } from '@/lib/calculations';
 
 // List every group the signed-in user belongs to, with bill counts and totals
 export async function GET() {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     const {
       data: { user },
@@ -15,7 +17,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data: memberships } = await supabase
+    const { data: memberships } = await db
       .from('group_members')
       .select('group_id, role')
       .eq('user_id', user.id);
@@ -25,7 +27,7 @@ export async function GET() {
       return NextResponse.json([]);
     }
 
-    const { data: groups, error } = await supabase
+    const { data: groups, error } = await db
       .from('groups')
       .select('*')
       .in('id', groupIds)
@@ -36,12 +38,12 @@ export async function GET() {
       return NextResponse.json({ error: 'Failed to fetch groups' }, { status: 500 });
     }
 
-    const { data: bills } = await supabase
+    const { data: bills } = await db
       .from('bills')
       .select('group_id, subtotal, tax, tip_amount, status')
       .in('group_id', groupIds);
 
-    const { data: memberCounts } = await supabase
+    const { data: memberCounts } = await db
       .from('group_members')
       .select('group_id')
       .in('group_id', groupIds);
@@ -67,7 +69,8 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     const {
       data: { user },
@@ -90,7 +93,7 @@ export async function POST(request: NextRequest) {
     // Unique invite code
     let invite_code = generateShortCode(8);
     for (let attempts = 0; attempts < 10; attempts++) {
-      const { data: existing } = await supabase
+      const { data: existing } = await db
         .from('groups')
         .select('id')
         .eq('invite_code', invite_code)
@@ -99,7 +102,7 @@ export async function POST(request: NextRequest) {
       invite_code = generateShortCode(8);
     }
 
-    const { data: group, error } = await supabase
+    const { data: group, error } = await db
       .from('groups')
       .insert({
         name: name.trim(),
@@ -116,13 +119,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Creator becomes the owner member, named from their profile
-    const { data: profile } = await supabase
+    const { data: profile } = await db
       .from('profiles')
       .select('display_name')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    await supabase.from('group_members').insert({
+    await db.from('group_members').insert({
       group_id: group.id,
       user_id: user.id,
       display_name: profile?.display_name || user.email?.split('@')[0] || 'Host',

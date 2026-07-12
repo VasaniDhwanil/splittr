@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { SupabaseClient } from '@supabase/supabase-js';
 
 async function requireGroupAccess(groupId: string, supabase: SupabaseClient) {
+  const db = createAdminClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) return { authorized: false as const };
 
-  const { data: group } = await supabase
+  const { data: group } = await db
     .from('groups')
     .select('*')
     .eq('id', groupId)
@@ -17,7 +19,7 @@ async function requireGroupAccess(groupId: string, supabase: SupabaseClient) {
 
   if (!group) return { authorized: false as const, notFound: true };
 
-  const { data: membership } = await supabase
+  const { data: membership } = await db
     .from('group_members')
     .select('*')
     .eq('group_id', groupId)
@@ -41,7 +43,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     const access = await requireGroupAccess(id, supabase);
     if (access.notFound) {
@@ -51,7 +54,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data: members } = await supabase
+    const { data: members } = await db
       .from('group_members')
       .select('*')
       .eq('group_id', id)
@@ -59,7 +62,7 @@ export async function GET(
 
     const memberIds = (members || []).map((m) => m.user_id);
     const { data: profiles } = memberIds.length
-      ? await supabase.from('profiles').select('*').in('user_id', memberIds)
+      ? await db.from('profiles').select('*').in('user_id', memberIds)
       : { data: [] };
 
     const membersWithProfiles = (members || []).map((m) => ({
@@ -67,7 +70,7 @@ export async function GET(
       profile: (profiles || []).find((p) => p.user_id === m.user_id) ?? null,
     }));
 
-    const { data: bills } = await supabase
+    const { data: bills } = await db
       .from('bills')
       .select('*')
       .eq('group_id', id)
@@ -76,7 +79,7 @@ export async function GET(
     const billIds = (bills || []).map((b) => b.id);
     let participants: { bill_id: string }[] = [];
     if (billIds.length > 0) {
-      const { data } = await supabase
+      const { data } = await db
         .from('participants')
         .select('*')
         .in('bill_id', billIds);
@@ -107,7 +110,8 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     const access = await requireGroupAccess(id, supabase);
     if (access.notFound) {
@@ -126,7 +130,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
     }
 
-    const { data: updated, error } = await supabase
+    const { data: updated, error } = await db
       .from('groups')
       .update(updateData)
       .eq('id', id)
@@ -151,7 +155,8 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     const access = await requireGroupAccess(id, supabase);
     if (access.notFound) {
@@ -161,7 +166,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Only the group owner can delete it' }, { status: 403 });
     }
 
-    const { error } = await supabase.from('groups').delete().eq('id', id);
+    const { error } = await db.from('groups').delete().eq('id', id);
 
     if (error) {
       return NextResponse.json({ error: 'Failed to delete group' }, { status: 500 });

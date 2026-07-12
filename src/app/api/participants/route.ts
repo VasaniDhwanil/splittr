@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { requireBillOwnership } from '@/lib/auth-helpers';
 import { cleanText, LIMITS } from '@/lib/validate';
 
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const body = await request.json();
 
     const { participant_id, payment_status, custom_amount } = body;
@@ -17,7 +19,7 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const { data: participant } = await supabase
+    const { data: participant } = await db
       .from('participants')
       .select('id, bill_id')
       .eq('id', participant_id)
@@ -53,7 +55,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
     }
 
-    const { data: updated, error } = await supabase
+    const { data: updated, error } = await db
       .from('participants')
       .update(updateData)
       .eq('id', participant_id)
@@ -80,7 +82,8 @@ export async function PATCH(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const body = await request.json();
 
     const { bill_id } = body;
@@ -94,7 +97,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if bill exists
-    const { data: bill } = await supabase
+    const { data: bill } = await db
       .from('bills')
       .select('id')
       .eq('id', bill_id)
@@ -108,7 +111,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Bound the table size — nobody splits dinner 50 ways
-    const { count } = await supabase
+    const { count } = await db
       .from('participants')
       .select('id', { count: 'exact', head: true })
       .eq('bill_id', bill_id);
@@ -121,7 +124,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if name already exists, append number if needed
-    const { data: existingWithName } = await supabase
+    const { data: existingWithName } = await db
       .from('participants')
       .select('name')
       .eq('bill_id', bill_id)
@@ -141,7 +144,7 @@ export async function POST(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     // Create new participant
-    const { data: participant, error } = await supabase
+    const { data: participant, error } = await db
       .from('participants')
       .insert({
         bill_id,

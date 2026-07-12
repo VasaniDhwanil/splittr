@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { requireBillOwnership } from '@/lib/auth-helpers';
 import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
 
@@ -9,16 +10,17 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     // Check if id is a short_code or UUID
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
     let billQuery;
     if (isUUID) {
-      billQuery = supabase.from('bills').select('*').eq('id', id).single();
+      billQuery = db.from('bills').select('*').eq('id', id).single();
     } else {
-      billQuery = supabase.from('bills').select('*').eq('short_code', id.toUpperCase()).single();
+      billQuery = db.from('bills').select('*').eq('short_code', id.toUpperCase()).single();
     }
 
     const { data: bill, error: billError } = await billQuery;
@@ -31,14 +33,14 @@ export async function GET(
     }
 
     // Get bill items
-    const { data: items } = await supabase
+    const { data: items } = await db
       .from('bill_items')
       .select('*')
       .eq('bill_id', bill.id)
       .order('created_at', { ascending: true });
 
     // Get participants
-    const { data: participants } = await supabase
+    const { data: participants } = await db
       .from('participants')
       .select('*')
       .eq('bill_id', bill.id)
@@ -46,7 +48,7 @@ export async function GET(
 
     // Get all claims for this bill's items
     const itemIds = items?.map(i => i.id) || [];
-    const { data: claims } = await supabase
+    const { data: claims } = await db
       .from('item_claims')
       .select('*')
       .in('item_id', itemIds);
@@ -55,7 +57,7 @@ export async function GET(
     // the payment handles configured on their profile
     let handleFallback: Record<string, string | null> = {};
     if (bill.creator_user_id && (!bill.venmo_handle || !bill.cashapp_handle || !bill.paypal_handle)) {
-      const { data: profile } = await supabase
+      const { data: profile } = await db
         .from('profiles')
         .select('venmo_handle, cashapp_handle, paypal_handle')
         .eq('user_id', bill.creator_user_id)
@@ -91,7 +93,8 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     // Ownership check — token or session required for mutations
     const ownership = await requireBillOwnership(request, id, supabase);
@@ -119,7 +122,7 @@ export async function PATCH(
     } = body;
 
     // Get current bill
-    const { data: bill } = await supabase
+    const { data: bill } = await db
       .from('bills')
       .select('subtotal, tax, tip_percent')
       .eq('id', id)
@@ -182,7 +185,7 @@ export async function PATCH(
         );
       }
 
-      const { data: existingItems } = await supabase
+      const { data: existingItems } = await db
         .from('bill_items')
         .select('id')
         .eq('bill_id', id);
@@ -193,15 +196,15 @@ export async function PATCH(
         const { id: itemId, ...clean } = item;
         if (itemId && existingIds.has(itemId)) {
           keptIds.add(itemId);
-          await supabase.from('bill_items').update(clean).eq('id', itemId);
+          await db.from('bill_items').update(clean).eq('id', itemId);
         } else {
-          await supabase.from('bill_items').insert({ bill_id: id, ...clean });
+          await db.from('bill_items').insert({ bill_id: id, ...clean });
         }
       }
 
       const toDelete = [...existingIds].filter((existingId) => !keptIds.has(existingId));
       if (toDelete.length > 0) {
-        await supabase.from('bill_items').delete().in('id', toDelete);
+        await db.from('bill_items').delete().in('id', toDelete);
       }
 
       subtotal = cleanItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -218,7 +221,7 @@ export async function PATCH(
       updateData.tip_amount = (subtotal + newTax) * (newTipPercent / 100);
     }
 
-    const { data: updatedBill, error } = await supabase
+    const { data: updatedBill, error } = await db
       .from('bills')
       .update(updateData)
       .eq('id', id)
@@ -248,7 +251,8 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     const ownership = await requireBillOwnership(request, id, supabase);
     if (ownership.notFound) {
@@ -259,7 +263,7 @@ export async function DELETE(
     }
 
     // Items, participants, and claims cascade-delete with the bill
-    const { error } = await supabase.from('bills').delete().eq('id', id);
+    const { error } = await db.from('bills').delete().eq('id', id);
 
     if (error) {
       console.error('Error deleting bill:', error);

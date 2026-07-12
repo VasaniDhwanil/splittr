@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 interface ClaimEntry {
   bill_id: string;
@@ -8,7 +9,8 @@ interface ClaimEntry {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     const {
       data: { user },
@@ -35,7 +37,7 @@ export async function POST(request: NextRequest) {
       const { bill_id, creator_token } = claim;
 
       // Only claim if token matches and bill is not already owned
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('bills')
         .update({ creator_user_id: user.id })
         .eq('id', bill_id)

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 /**
  * Settle up between the signed-in user and one counterparty inside a group.
@@ -13,7 +14,8 @@ export async function POST(
 ) {
   try {
     const { id: groupId } = await params;
-    const supabase = await createClient();
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     const {
       data: { user },
@@ -24,7 +26,7 @@ export async function POST(
     }
 
     // Caller must be a member
-    const { data: myMembership } = await supabase
+    const { data: myMembership } = await db
       .from('group_members')
       .select('display_name')
       .eq('group_id', groupId)
@@ -48,7 +50,7 @@ export async function POST(
 
     let counterpartyNames: string[] = [];
     if (counterparty_user_id) {
-      const { data: theirMembership } = await supabase
+      const { data: theirMembership } = await db
         .from('group_members')
         .select('display_name')
         .eq('group_id', groupId)
@@ -65,7 +67,7 @@ export async function POST(
     const myNames = [myMembership.display_name.toLowerCase()];
 
     // All active bills in this group, with their participants
-    const { data: bills } = await supabase
+    const { data: bills } = await db
       .from('bills')
       .select('id, creator_user_id, status')
       .eq('group_id', groupId)
@@ -76,7 +78,7 @@ export async function POST(
       return NextResponse.json({ settled: 0 });
     }
 
-    const { data: participants } = await supabase
+    const { data: participants } = await db
       .from('participants')
       .select('id, bill_id, user_id, name, is_creator, payment_status')
       .in('bill_id', billIds);
@@ -103,7 +105,7 @@ export async function POST(
     }
 
     if (toSettle.length > 0) {
-      const { error } = await supabase
+      const { error } = await db
         .from('participants')
         .update({ payment_status: 'paid', paid_at: new Date().toISOString() })
         .in('id', toSettle);
