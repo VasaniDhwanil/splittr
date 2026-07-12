@@ -26,12 +26,30 @@ export async function POST(request: NextRequest) {
     // caller could attach claims across unrelated bills
     const [{ data: participant }, { data: item }] = await Promise.all([
       db.from('participants').select('bill_id').eq('id', participant_id).maybeSingle(),
-      db.from('bill_items').select('bill_id').eq('id', item_id).maybeSingle(),
+      db.from('bill_items').select('bill_id, quantity').eq('id', item_id).maybeSingle(),
     ]);
 
     if (!participant || !item || participant.bill_id !== item.bill_id) {
       return NextResponse.json(
         { error: 'Participant and item do not belong to the same bill' },
+        { status: 400 }
+      );
+    }
+
+    // The UI checks remaining quantity, but the API must too: total claimed
+    // shares can never exceed the item's quantity (this caller's own claim is
+    // replaced by the upsert, so it doesn't count against the budget).
+    const { data: itemClaims } = await db
+      .from('item_claims')
+      .select('participant_id, share')
+      .eq('item_id', item_id);
+    const othersTotal = (itemClaims || [])
+      .filter((c) => c.participant_id !== participant_id)
+      .reduce((sum, c) => sum + Number(c.share), 0);
+    if (othersTotal + share > Number(item.quantity) + 1e-9) {
+      const remaining = Math.max(0, Number(item.quantity) - othersTotal);
+      return NextResponse.json(
+        { error: remaining > 0 ? `Only ${remaining} left to claim` : 'All claimed already' },
         { status: 400 }
       );
     }
