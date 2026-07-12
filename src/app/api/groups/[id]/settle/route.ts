@@ -37,7 +37,10 @@ export async function POST(
       return NextResponse.json({ error: 'Not a member of this group' }, { status: 403 });
     }
 
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     // counterparty is either a member user id, or a raw participant name for
     // people who never signed in
     const { counterparty_user_id, counterparty_name } = body;

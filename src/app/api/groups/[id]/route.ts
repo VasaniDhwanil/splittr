@@ -121,7 +121,10 @@ export async function PATCH(
       return NextResponse.json({ error: 'Only the group owner can edit it' }, { status: 403 });
     }
 
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     const updateData: Record<string, unknown> = {};
     if (typeof body.name === 'string' && body.name.trim()) updateData.name = body.name.trim();
     if (typeof body.emoji === 'string' && body.emoji.trim()) updateData.emoji = body.emoji.trim();

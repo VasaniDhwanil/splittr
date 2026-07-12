@@ -7,7 +7,10 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient(); // auth (cookies) only
     const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
 
     const { participant_id, item_id } = body;
     const share = clampNumber(body.share ?? 1.0, 0.01, LIMITS.maxShare);

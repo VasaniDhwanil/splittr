@@ -8,7 +8,10 @@ export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient(); // auth (cookies) only
     const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
 
     const { participant_id, payment_status, custom_amount } = body;
 
@@ -84,7 +87,10 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient(); // auth (cookies) only
     const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
 
     const { bill_id } = body;
     let name = cleanText(body.name, LIMITS.personName);

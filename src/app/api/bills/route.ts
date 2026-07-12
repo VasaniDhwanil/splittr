@@ -18,7 +18,10 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createClient(); // auth (cookies) only
     const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
 
     const {
       split_mode = 'items',

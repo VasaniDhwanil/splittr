@@ -83,7 +83,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     const { name, emoji } = body;
 
     if (!name || typeof name !== 'string' || !name.trim()) {
