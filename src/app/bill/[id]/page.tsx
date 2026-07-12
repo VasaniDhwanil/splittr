@@ -103,6 +103,7 @@ export default function BillPage() {
   const [editVenmo, setEditVenmo] = useState('');
   const [editCashapp, setEditCashapp] = useState('');
   const [editPaypal, setEditPaypal] = useState('');
+  const [editPaidBy, setEditPaidBy] = useState<string | null>(null); // null = creator paid
 
   // Payments
   const [payingParticipantId, setPayingParticipantId] = useState<string | null>(null);
@@ -614,6 +615,7 @@ export default function BillPage() {
     setEditVenmo(bill.venmo_handle || '');
     setEditCashapp(bill.cashapp_handle || '');
     setEditPaypal(bill.paypal_handle || '');
+    setEditPaidBy(bill.paid_by_user_id ?? null);
     setShowEditDialog(true);
   };
 
@@ -644,6 +646,7 @@ export default function BillPage() {
           venmo_handle: editVenmo,
           cashapp_handle: editCashapp,
           paypal_handle: editPaypal,
+          ...(bill.group_id ? { paid_by_user_id: editPaidBy } : {}),
         }),
       });
 
@@ -775,13 +778,29 @@ export default function BillPage() {
   const grandTotal = billTotal(bill);
   const ModeIcon = SPLIT_MODE_META[splitMode].icon;
 
-  // Payment tracking (creator collects, so progress is over everyone else)
-  const payers = participants.filter((p) => !p.is_creator);
+  // Whoever fronted the money collects: paid_by when set, else the creator
+  const payerParticipantId = bill.paid_by_user_id
+    ? participants.find((p) => p.user_id === bill.paid_by_user_id)?.id ?? null
+    : creatorParticipant?.id ?? null;
+  const payerDisplayName = bill.paid_by?.name || creatorParticipant?.name || 'the host';
+  const iAmPayer = bill.paid_by_user_id
+    ? currentParticipant?.id === payerParticipantId
+    : Boolean(currentParticipant?.is_creator);
+  // Payment tracking (the payer collects, so progress is over everyone else)
+  const payers = participants.filter((p) =>
+    bill.paid_by_user_id ? p.id !== payerParticipantId : !p.is_creator
+  );
   const paidCount = payers.filter((p) => p.payment_status === 'paid').length;
   const iAmPaid = currentParticipant?.payment_status === 'paid';
+  // Deep links point at the payer's handles (their profile) when someone
+  // other than the creator paid; otherwise the bill's own handles.
+  const paySource =
+    bill.paid_by && (bill.paid_by.venmo_handle || bill.paid_by.cashapp_handle || bill.paid_by.paypal_handle)
+      ? bill.paid_by
+      : bill;
   const myPaymentOptions =
-    currentParticipant && !currentParticipant.is_creator && myShare && billHasPaymentMethods(bill)
-      ? getPaymentOptions(bill, myShare.total, `Splittr: ${bill.name}`)
+    currentParticipant && !iAmPayer && myShare && billHasPaymentMethods(paySource)
+      ? getPaymentOptions(paySource, myShare.total, `Splittr: ${bill.name}`)
       : [];
 
   // Custom mode: how much of the bill is assigned so far
@@ -833,6 +852,12 @@ export default function BillPage() {
                     <ModeIcon className="h-3 w-3" />
                     {SPLIT_MODE_META[splitMode].label}
                   </span>
+                  {bill.paid_by && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-white/5 text-white/50 border border-white/10">
+                      <Wallet className="h-3 w-3" />
+                      Paid by {bill.paid_by.name}
+                    </span>
+                  )}
                 </div>
                 <p className="text-muted-foreground text-sm">
                   Share code: <span className="font-mono font-semibold text-foreground">{bill.short_code}</span>
@@ -1190,8 +1215,8 @@ export default function BillPage() {
               <CardDescription>
                 {iAmPaid
                   ? 'You are marked as paid. Thanks for settling up!'
-                  : creatorParticipant
-                  ? `You owe ${creatorParticipant.name} ${formatCurrency(myShare.total)}.`
+                  : payerDisplayName
+                  ? `You owe ${payerDisplayName} ${formatCurrency(myShare.total)}.`
                   : `Your share is ${formatCurrency(myShare.total)}.`}
               </CardDescription>
             </CardHeader>
@@ -1228,7 +1253,7 @@ export default function BillPage() {
               )}
               {!iAmPaid && myPaymentOptions.length === 0 && (
                 <p className="text-sm text-muted-foreground">
-                  Pay {creatorParticipant?.name || 'the host'} however you usually do, then mark yourself paid.
+                  Pay {payerDisplayName} however you usually do, then mark yourself paid.
                 </p>
               )}
               <Button
@@ -1592,6 +1617,41 @@ export default function BillPage() {
                   />
                 </div>
               </div>
+
+              {bill.group_id && (bill.group_members?.length ?? 0) > 1 && (
+                <div className="space-y-2">
+                  <Label>Who paid?</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditPaidBy(null)}
+                      className={`px-3 py-1.5 rounded-full border text-sm transition-smooth ${
+                        editPaidBy === null
+                          ? 'border-primary/60 bg-primary/10'
+                          : 'border-white/10 bg-white/5 hover:bg-white/10'
+                      }`}
+                    >
+                      {creatorParticipant?.name || 'Creator'} (creator)
+                    </button>
+                    {(bill.group_members ?? [])
+                      .filter((m) => m.user_id !== bill.creator_user_id)
+                      .map((m) => (
+                        <button
+                          key={m.user_id}
+                          type="button"
+                          onClick={() => setEditPaidBy(m.user_id)}
+                          className={`px-3 py-1.5 rounded-full border text-sm transition-smooth ${
+                            editPaidBy === m.user_id
+                              ? 'border-primary/60 bg-primary/10'
+                              : 'border-white/10 bg-white/5 hover:bg-white/10'
+                          }`}
+                        >
+                          {m.display_name}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>Tip split</Label>

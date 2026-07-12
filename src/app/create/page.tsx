@@ -55,6 +55,9 @@ export default function CreatePage() {
 
   const [groups, setGroups] = useState<GroupOption[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [groupMembers, setGroupMembers] = useState<{ user_id: string; display_name: string }[]>([]);
+  const [paidByUserId, setPaidByUserId] = useState<string | null>(null); // null = I paid
 
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const tipAmount = (subtotal + tax) * (tipPercent / 100);
@@ -76,6 +79,7 @@ export default function CreatePage() {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setMyUserId(user.id);
       const [groupsRes, profileRes] = await Promise.all([
         fetch('/api/groups'),
         fetch('/api/profile'),
@@ -97,6 +101,19 @@ export default function CreatePage() {
     };
     loadAccount();
   }, []);
+
+  // Load the member list for the payer picker whenever a group is selected
+  useEffect(() => {
+    setPaidByUserId(null);
+    if (!selectedGroupId) {
+      setGroupMembers([]);
+      return;
+    }
+    fetch(`/api/groups/${selectedGroupId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setGroupMembers(data?.members ?? []))
+      .catch(() => setGroupMembers([]));
+  }, [selectedGroupId]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -205,6 +222,7 @@ export default function CreatePage() {
           cashapp_handle: cashappHandle,
           paypal_handle: paypalHandle,
           group_id: selectedGroupId,
+          paid_by_user_id: paidByUserId,
         }),
       });
 
@@ -559,6 +577,40 @@ export default function CreatePage() {
                       </button>
                     ))}
                   </div>
+                  {selectedGroupId && groupMembers.length > 1 && (
+                    <div className="pt-2 space-y-2">
+                      <Label className="text-white/60 text-sm">Who paid?</Label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPaidByUserId(null)}
+                          className={`px-3 py-1.5 rounded-full text-sm border transition-smooth ${
+                            paidByUserId === null
+                              ? 'border-primary/60 bg-primary/10 text-white'
+                              : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
+                          }`}
+                        >
+                          I paid
+                        </button>
+                        {groupMembers
+                          .filter((m) => m.user_id !== myUserId)
+                          .map((m) => (
+                            <button
+                              key={m.user_id}
+                              type="button"
+                              onClick={() => setPaidByUserId(m.user_id)}
+                              className={`px-3 py-1.5 rounded-full text-sm border transition-smooth ${
+                                paidByUserId === m.user_id
+                                  ? 'border-primary/60 bg-primary/10 text-white'
+                                  : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
+                              }`}
+                            >
+                              {m.display_name} paid
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

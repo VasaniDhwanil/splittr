@@ -73,14 +73,24 @@ export function computeGroupLedger(bills: BillDetail[], members: GroupMember[]):
     if (bill.status === 'settled') continue;
     const host = bill.participants.find((p) => p.is_creator);
     if (!host) continue;
-    const creditor = canonical(bill.creator_user_id ?? host.user_id, host.name);
+
+    // Debts flow to whoever actually paid: paid_by_user_id when set
+    // (Splitwise-style "on behalf of"), otherwise the bill's creator.
+    const creditor = bill.paid_by_user_id
+      ? canonical(bill.paid_by_user_id, host.name)
+      : canonical(bill.creator_user_id ?? host.user_id, host.name);
 
     const splits = calculateSplits(bill, bill.items, bill.participants, bill.claims);
     for (const split of splits) {
       const p = split.participant;
-      if (p.is_creator) continue;
       if (p.payment_status === 'paid') continue;
-      addDebt(canonical(p.user_id, p.name), creditor, split.total);
+      // Creator fronted the money themselves unless someone else is the payer
+      if (!bill.paid_by_user_id && p.is_creator) continue;
+      const debtor = canonical(p.user_id, p.name);
+      // The payer never owes themselves — and when the payer isn't the
+      // creator, the creator owes their share like everyone else.
+      if (debtor.key === creditor.key) continue;
+      addDebt(debtor, creditor, split.total);
     }
   }
 

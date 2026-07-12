@@ -80,6 +80,33 @@ export async function POST(request: NextRequest) {
       if (membership) validGroupId = group_id;
     }
 
+    // "Paid by" (Splitwise-style): only on group bills, and the payer must
+    // be a member of that group. Null means the creator paid.
+    let paidByUserId: string | null = null;
+    if (body.paid_by_user_id && typeof body.paid_by_user_id === 'string') {
+      if (!validGroupId) {
+        return NextResponse.json(
+          { error: 'paid_by_user_id requires a group bill' },
+          { status: 400 }
+        );
+      }
+      if (body.paid_by_user_id !== user!.id) {
+        const { data: payerMembership } = await db
+          .from('group_members')
+          .select('id')
+          .eq('group_id', validGroupId)
+          .eq('user_id', body.paid_by_user_id)
+          .maybeSingle();
+        if (!payerMembership) {
+          return NextResponse.json(
+            { error: 'The payer must be a member of the group' },
+            { status: 400 }
+          );
+        }
+      }
+      paidByUserId = body.paid_by_user_id;
+    }
+
     // Generate unique short code
     let short_code = generateShortCode();
     let attempts = 0;
@@ -113,6 +140,7 @@ export async function POST(request: NextRequest) {
         cashapp_handle,
         paypal_handle,
         group_id: validGroupId,
+        paid_by_user_id: paidByUserId,
         ...(user ? { creator_user_id: user.id } : {}),
       })
       .select()

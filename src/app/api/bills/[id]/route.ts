@@ -71,9 +71,40 @@ export async function GET(
       }
     }
 
+    // Group bills: expose the member list (for the payer picker) and, when
+    // someone other than the creator paid, that payer's name + pay handles.
+    let groupMembers: { user_id: string; display_name: string }[] | undefined;
+    let paidBy: Record<string, unknown> | null = null;
+    if (bill.group_id) {
+      const { data: members } = await db
+        .from('group_members')
+        .select('user_id, display_name')
+        .eq('group_id', bill.group_id)
+        .order('created_at', { ascending: true });
+      groupMembers = members || [];
+
+      if (bill.paid_by_user_id) {
+        const member = groupMembers.find((m) => m.user_id === bill.paid_by_user_id);
+        const { data: payerProfile } = await db
+          .from('profiles')
+          .select('display_name, venmo_handle, cashapp_handle, paypal_handle')
+          .eq('user_id', bill.paid_by_user_id)
+          .maybeSingle();
+        paidBy = {
+          user_id: bill.paid_by_user_id,
+          name: member?.display_name || payerProfile?.display_name || 'Someone',
+          venmo_handle: payerProfile?.venmo_handle ?? null,
+          cashapp_handle: payerProfile?.cashapp_handle ?? null,
+          paypal_handle: payerProfile?.paypal_handle ?? null,
+        };
+      }
+    }
+
     return NextResponse.json({
       ...bill,
       ...handleFallback,
+      ...(groupMembers ? { group_members: groupMembers } : {}),
+      paid_by: paidBy,
       items: items || [],
       participants: participants || [],
       claims: claims || [],
@@ -127,7 +158,7 @@ export async function PATCH(
     // Get current bill
     const { data: bill } = await db
       .from('bills')
-      .select('subtotal, tax, tip_percent')
+      .select('subtotal, tax, tip_percent, group_id')
       .eq('id', id)
       .single();
 
@@ -139,6 +170,34 @@ export async function PATCH(
     }
 
     const updateData: Record<string, unknown> = {};
+
+    // Change who paid: group bills only, payer must be a member (or null to
+    // reset to "the creator paid")
+    if (body.paid_by_user_id !== undefined) {
+      if (body.paid_by_user_id === null) {
+        updateData.paid_by_user_id = null;
+      } else {
+        if (!bill.group_id || typeof body.paid_by_user_id !== 'string') {
+          return NextResponse.json(
+            { error: 'paid_by_user_id requires a group bill' },
+            { status: 400 }
+          );
+        }
+        const { data: payerMembership } = await db
+          .from('group_members')
+          .select('id')
+          .eq('group_id', bill.group_id)
+          .eq('user_id', body.paid_by_user_id)
+          .maybeSingle();
+        if (!payerMembership) {
+          return NextResponse.json(
+            { error: 'The payer must be a member of the group' },
+            { status: 400 }
+          );
+        }
+        updateData.paid_by_user_id = body.paid_by_user_id;
+      }
+    }
 
     if (name !== undefined) {
       const clean = cleanText(name, LIMITS.billName);

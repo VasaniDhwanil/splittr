@@ -58,6 +58,6 @@ export function getPaymentOptions(source: PaymentHandles, amount: number, note: 
   return options;
 }
 
-export function billHasPaymentMethods(bill: Bill): boolean {
-  return Boolean(bill.venmo_handle || bill.cashapp_handle || bill.paypal_handle);
+export function billHasPaymentMethods(source: PaymentHandles): boolean {
+  return Boolean(source.venmo_handle || source.cashapp_handle || source.paypal_handle);
 }

@@ -19,7 +19,21 @@ export interface Bill {
   cashapp_handle?: string | null;
   paypal_handle?: string | null;
   group_id?: string | null;
+  /** Whose money covered the bill; null = the creator paid (default). */
+  paid_by_user_id?: string | null;
+  /** Enriched by GET /api/bills/[id] when paid_by_user_id is set. */
+  paid_by?: PaidBy | null;
+  /** Group members, enriched on group bills so the UI can pick a payer. */
+  group_members?: { user_id: string; display_name: string }[];
   created_at: string;
+}
+
+export interface PaidBy {
+  user_id: string;
+  name: string;
+  venmo_handle?: string | null;
+  cashapp_handle?: string | null;
+  paypal_handle?: string | null;
 }
 
 export interface BillItem {
