@@ -87,11 +87,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     const { bill_id } = body;
-    const name = cleanText(body.name, LIMITS.personName);
+    let name = cleanText(body.name, LIMITS.personName);
 
-    if (!bill_id || !name) {
+    if (!bill_id) {
       return NextResponse.json(
-        { error: 'bill_id and name are required' },
+        { error: 'bill_id is required' },
         { status: 400 }
       );
     }
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
     // Check if bill exists
     const { data: bill } = await db
       .from('bills')
-      .select('id')
+      .select('id, group_id')
       .eq('id', bill_id)
       .single();
 
@@ -108,6 +108,57 @@ export async function POST(request: NextRequest) {
         { error: 'Bill not found' },
         { status: 404 }
       );
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    // A signed-in account joins a bill at most once — return the existing row
+    if (user) {
+      const { data: mine } = await db
+        .from('participants')
+        .select('*')
+        .eq('bill_id', bill_id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (mine) return NextResponse.json(mine);
+    }
+
+    // Nameless join: signed-in users can join under their known identity —
+    // their display name in the bill's group, falling back to their profile.
+    if (!name) {
+      if (!user) {
+        return NextResponse.json(
+          { error: 'bill_id and name are required' },
+          { status: 400 }
+        );
+      }
+      let derived: string | null = null;
+      if (bill.group_id) {
+        const { data: membership } = await db
+          .from('group_members')
+          .select('display_name')
+          .eq('group_id', bill.group_id)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        derived = membership?.display_name || null;
+      }
+      if (!derived) {
+        const { data: profile } = await db
+          .from('profiles')
+          .select('display_name')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        derived = profile?.display_name || user.email?.split('@')[0] || null;
+      }
+      name = cleanText(derived, LIMITS.personName);
+      if (!name) {
+        return NextResponse.json(
+          { error: 'bill_id and name are required' },
+          { status: 400 }
+        );
+      }
     }
 
     // Bound the table size — nobody splits dinner 50 ways
@@ -137,13 +188,8 @@ export async function POST(request: NextRequest) {
       finalName = `${name.trim()} (${count + 1})`;
     }
 
-    // Link the participant to their account when they're signed in, so
-    // group balances can track them across bills
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    // Create new participant
+    // Create new participant (linked to their account when signed in, so
+    // group balances can track them across bills)
     const { data: participant, error } = await db
       .from('participants')
       .insert({

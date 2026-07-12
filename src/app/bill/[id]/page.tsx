@@ -14,7 +14,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import {
@@ -286,6 +285,42 @@ export default function BillPage() {
     setHasCreatorToken(Boolean(localStorage.getItem(`splittr-creator-token-${bill.id}`)));
   }, [bill, participants]);
 
+  // Recognize signed-in users across devices: if their account already has a
+  // participant row on this bill, adopt it instead of asking them to join.
+  useEffect(() => {
+    if (!bill || currentParticipant) return;
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      const mine = participants.find((p) => p.user_id === user.id);
+      if (mine) {
+        setCurrentParticipant(mine);
+        localStorage.setItem(`splittr-participant-${bill.id}`, mine.id);
+      }
+    });
+  }, [bill, participants, currentParticipant]);
+
+  // Join without the name prompt — the server derives the name from the
+  // caller's group membership or profile. Returns null when not signed in.
+  const autoJoin = async (): Promise<Participant | null> => {
+    if (!bill) return null;
+    try {
+      const res = await fetch('/api/participants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bill_id: bill.id }),
+      });
+      if (!res.ok) return null;
+      const participant: Participant = await res.json();
+      setCurrentParticipant(participant);
+      localStorage.setItem(`splittr-participant-${bill.id}`, participant.id);
+      toast.success(`Welcome, ${participant.name}!`);
+      return participant;
+    } catch {
+      return null;
+    }
+  };
+
   const isCreator = Boolean(currentParticipant?.is_creator) || hasCreatorToken;
   const creatorParticipant = participants.find((p) => p.is_creator);
 
@@ -343,20 +378,26 @@ export default function BillPage() {
   const handleToggleClaim = async (item: BillItem) => {
     if (splitMode !== 'items') return;
 
-    if (!currentParticipant) {
-      setShowJoinDialog(true);
-      return;
+    // Signed-in users join silently under their known identity; the name
+    // dialog is only for anonymous visitors.
+    let me = currentParticipant;
+    if (!me) {
+      me = await autoJoin();
+      if (!me) {
+        setShowJoinDialog(true);
+        return;
+      }
     }
 
     const existingClaim = claims.find(
-      (c) => c.participant_id === currentParticipant.id && c.item_id === item.id
+      (c) => c.participant_id === me.id && c.item_id === item.id
     );
 
     // If already claimed, unclaim
     if (existingClaim) {
       setClaimingItemId(item.id);
       try {
-        await fetch(`/api/claims?participant_id=${currentParticipant.id}&item_id=${item.id}`, {
+        await fetch(`/api/claims?participant_id=${me.id}&item_id=${item.id}`, {
           method: 'DELETE',
         });
         toast.success("Got it, you're off the hook!");
@@ -389,7 +430,7 @@ export default function BillPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          participant_id: currentParticipant.id,
+          participant_id: me.id,
           item_id: item.id,
           share: 1,
         }),
@@ -864,9 +905,18 @@ export default function BillPage() {
               </CardTitle>
               {!currentParticipant && (
                 <Dialog open={showJoinDialog} onOpenChange={setShowJoinDialog}>
-                  <DialogTrigger asChild>
-                    <Button size="sm" className="transition-smooth hover:scale-105">Join the fun</Button>
-                  </DialogTrigger>
+                  <Button
+                    size="sm"
+                    className="transition-smooth hover:scale-105"
+                    onClick={async () => {
+                      // Signed-in users join under their known identity;
+                      // the name dialog is the anonymous fallback.
+                      const joined = await autoJoin();
+                      if (!joined) setShowJoinDialog(true);
+                    }}
+                  >
+                    Join the fun
+                  </Button>
                   <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                       <DialogTitle>Join the Split</DialogTitle>
