@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Loader2, Users } from 'lucide-react';
+import { Loader2, Users, SearchX } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 export default function GroupJoinPage() {
@@ -87,7 +87,7 @@ function GroupJoin() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-4 py-16">
+    <main className="min-h-dvh flex flex-col items-center justify-center px-4 py-16">
       <div className="w-full max-w-sm">
         <Card className="shadow-lg">
           <CardContent className="py-10 text-center">
@@ -110,7 +110,9 @@ function GroupJoin() {
 
             {state === 'preview' && preview && (
               <>
-                <div className="text-5xl mb-3">{preview.emoji}</div>
+                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Users className="h-7 w-7 text-primary" />
+                </div>
                 <h1 className="text-2xl font-bold mb-1">{preview.name}</h1>
                 <p className="text-muted-foreground text-sm mb-6">
                   {preview.member_count} member{preview.member_count !== 1 && 's'} · You&apos;ve been invited
@@ -131,7 +133,7 @@ function GroupJoin() {
             {state === 'invalid' && (
               <>
                 <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-2xl">🔍</span>
+                  <SearchX className="h-6 w-6 text-white/50" />
                 </div>
                 <h1 className="text-xl font-semibold mb-2">Invite not found</h1>
                 <p className="text-muted-foreground text-sm mb-6">

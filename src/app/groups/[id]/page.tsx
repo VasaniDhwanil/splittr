@@ -30,6 +30,7 @@ import {
   Copy,
   Mail,
   LogOut,
+  Lock,
   ExternalLink,
   Scale,
   Users,
@@ -64,7 +65,6 @@ export default function GroupPage() {
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
   const [renameValue, setRenameValue] = useState('');
-  const [emojiValue, setEmojiValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [settlingKey, setSettlingKey] = useState<string | null>(null);
@@ -190,7 +190,7 @@ export default function GroupPage() {
         ),
       });
       if (!res.ok) throw new Error('Failed to settle');
-      toast.success(`Settled up with ${balance.counterparty.name} 🎉`);
+      toast.success(`Settled up with ${balance.counterparty.name}`);
       await fetchGroup();
     } catch {
       toast.error('Failed to settle');
@@ -206,7 +206,7 @@ export default function GroupPage() {
       const response = await fetch(`/api/groups/${groupId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: renameValue, emoji: emojiValue }),
+        body: JSON.stringify({ name: renameValue }),
       });
       if (!response.ok) throw new Error('Failed to rename group');
       setShowRenameDialog(false);
@@ -253,7 +253,7 @@ export default function GroupPage() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen py-8">
+      <main className="min-h-dvh py-8">
         <div className="container mx-auto px-4 max-w-2xl flex flex-col justify-center items-center min-h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
           <p className="text-muted-foreground">Loading group...</p>
@@ -264,12 +264,12 @@ export default function GroupPage() {
 
   if (unauthorized || !group) {
     return (
-      <main className="min-h-screen py-8">
+      <main className="min-h-dvh py-8">
         <div className="container mx-auto px-4 max-w-2xl">
           <Card className="shadow-lg">
             <CardContent className="py-12 text-center">
               <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">🔒</span>
+                <Lock className="h-6 w-6 text-white/50" />
               </div>
               <h2 className="text-xl font-semibold mb-2">
                 {unauthorized ? 'Sign in required' : 'Group not found'}
@@ -295,7 +295,7 @@ export default function GroupPage() {
   const owedToMe = myBalances.filter((b) => b.amount < 0);
 
   return (
-    <main className="min-h-screen py-8">
+    <main className="min-h-dvh py-8">
       <div className="container mx-auto px-4 max-w-2xl">
         <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -308,8 +308,7 @@ export default function GroupPage() {
             <div className="flex justify-between items-start gap-3 flex-wrap">
               <div>
                 <h1 className="text-2xl font-bold flex items-center gap-2">
-                  <span className="text-3xl">{group.emoji}</span>
-                  {group.name}
+                                    {group.name}
                 </h1>
                 <p className="text-muted-foreground text-sm mt-1">
                   {group.members.length} member{group.members.length !== 1 && 's'} ·{' '}
@@ -337,8 +336,7 @@ export default function GroupPage() {
                       title="Edit group"
                       onClick={() => {
                         setRenameValue(group.name);
-                        setEmojiValue(group.emoji);
-                        setShowRenameDialog(true);
+                                        setShowRenameDialog(true);
                       }}
                     >
                       <Pencil className="h-4 w-4" />
@@ -655,25 +653,6 @@ export default function GroupPage() {
               <DialogTitle>Edit group</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="groupEmoji">Emoji</Label>
-                <div className="flex flex-wrap gap-2">
-                  {['👥', '🏠', '✈️', '🎉', '🍕', '⛺', '💼', '🏖️'].map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setEmojiValue(emoji)}
-                      className={`w-11 h-11 rounded-xl text-xl flex items-center justify-center border transition-smooth ${
-                        emojiValue === emoji
-                          ? 'border-primary/60 bg-primary/10'
-                          : 'border-white/10 bg-white/5 hover:bg-white/10'
-                      }`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
               <div className="space-y-2">
                 <Label htmlFor="groupName">Name</Label>
                 <Input

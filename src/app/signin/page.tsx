@@ -68,7 +68,7 @@ function SignInForm() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-4 py-16">
+    <main className="min-h-dvh flex flex-col items-center justify-center px-4 py-16">
       <div className="w-full max-w-sm">
         {/* Back link */}
         <Link

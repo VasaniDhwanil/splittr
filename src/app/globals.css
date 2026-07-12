@@ -119,6 +119,12 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    /* The overscroll/rubber-band canvas must match the app background,
+       and bouncing past the page edges just exposes it — disable that. */
+    background-color: #000;
+    overscroll-behavior-y: none;
+  }
   body {
     @apply bg-background text-foreground;
   }

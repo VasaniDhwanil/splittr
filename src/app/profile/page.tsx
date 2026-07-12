@@ -73,7 +73,7 @@ export default function ProfilePage() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen py-8">
+      <main className="min-h-dvh py-8">
         <div className="container mx-auto px-4 max-w-lg flex justify-center items-center min-h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
@@ -82,7 +82,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="min-h-screen py-8">
+    <main className="min-h-dvh py-8">
       <div className="container mx-auto px-4 max-w-lg">
         <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
           <ArrowLeft className="h-4 w-4 mr-2" />

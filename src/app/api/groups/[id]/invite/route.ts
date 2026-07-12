@@ -73,7 +73,7 @@ export async function POST(
 
     const { data: group } = await db
       .from('groups')
-      .select('name, emoji, invite_code')
+      .select('name, invite_code')
       .eq('id', groupId)
       .maybeSingle();
 
@@ -87,7 +87,6 @@ export async function POST(
 
     const { subject, html, text } = buildGroupInviteEmail({
       groupName: group.name,
-      groupEmoji: group.emoji,
       inviterName,
       joinUrl,
     });

@@ -49,7 +49,7 @@ export default function JoinPage() {
   };
 
   return (
-    <main className="min-h-screen py-8">
+    <main className="min-h-dvh py-8">
       <div className="container mx-auto px-4 max-w-md">
         <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
           <ArrowLeft className="h-4 w-4 mr-2" />

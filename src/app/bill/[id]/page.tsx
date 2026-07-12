@@ -23,7 +23,6 @@ import {
   Check,
   Users,
   Loader2,
-  Sparkles,
   CheckCircle2,
   RotateCcw,
   Pencil,
@@ -34,6 +33,7 @@ import {
   ReceiptText,
   SlidersHorizontal,
   ExternalLink,
+  SearchX,
 } from 'lucide-react';
 import { formatCurrency, calculateSplits, billTotal, formatShare } from '@/lib/calculations';
 import { getPaymentOptions, billHasPaymentMethods } from '@/lib/payment-links';
@@ -566,7 +566,7 @@ export default function BillPage() {
       if (!response.ok) throw new Error('Failed to update payment status');
       toast.success(
         newStatus === 'paid'
-          ? `${participant.id === currentParticipant?.id ? 'You are' : participant.name + ' is'} marked as paid 🎉`
+          ? `${participant.id === currentParticipant?.id ? 'You are' : participant.name + ' is'} marked as paid`
           : 'Marked as unpaid'
       );
       await fetchBill();
@@ -739,7 +739,7 @@ export default function BillPage() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen py-8">
+      <main className="min-h-dvh py-8">
         <div className="container mx-auto px-4 max-w-2xl flex flex-col justify-center items-center min-h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
           <p className="text-muted-foreground">Loading your bill...</p>
@@ -750,12 +750,12 @@ export default function BillPage() {
 
   if (!bill) {
     return (
-      <main className="min-h-screen py-8">
+      <main className="min-h-dvh py-8">
         <div className="container mx-auto px-4 max-w-2xl">
           <Card className="shadow-lg">
             <CardContent className="py-12 text-center">
               <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">🔍</span>
+                <SearchX className="h-6 w-6 text-white/50" />
               </div>
               <h2 className="text-xl font-semibold mb-2">Bill Not Found</h2>
               <p className="text-muted-foreground mb-6">
@@ -789,7 +789,7 @@ export default function BillPage() {
   const unassigned = grandTotal - assignedTotal;
 
   return (
-    <main className="min-h-screen py-8 pb-36">
+    <main className="min-h-dvh py-8 pb-36">
       {/* Confetti overlay */}
       {showConfetti && (
         <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
@@ -1161,7 +1161,7 @@ export default function BillPage() {
         {allItemsClaimed && (
           <Card className="mb-6 shadow-sm bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20">
             <CardContent className="py-6 text-center">
-              <Sparkles className="h-8 w-8 text-primary mx-auto mb-2" />
+              <CheckCircle2 className="h-8 w-8 text-primary mx-auto mb-2" />
               <h3 className="font-semibold text-lg">All items claimed!</h3>
               <p className="text-muted-foreground text-sm">Everyone&apos;s share is calculated below.</p>
             </CardContent>

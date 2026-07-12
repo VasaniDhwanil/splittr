@@ -97,7 +97,6 @@ function emailShell(bodyHtml: string): string {
 
 export interface GroupInviteEmail {
   groupName: string;
-  groupEmoji: string;
   inviterName: string;
   joinUrl: string;
 }
@@ -108,10 +107,9 @@ export function buildGroupInviteEmail(input: GroupInviteEmail): {
   html: string;
   text: string;
 } {
-  const { groupName, groupEmoji, inviterName, joinUrl } = input;
+  const { groupName, inviterName, joinUrl } = input;
   const safeName = escapeHtml(groupName);
   const safeInviter = escapeHtml(inviterName);
-  const safeEmoji = escapeHtml(groupEmoji || '👥');
 
   const body = `
         <tr>
@@ -122,7 +120,7 @@ export function buildGroupInviteEmail(input: GroupInviteEmail): {
         <tr>
           <td style="padding:0 40px 24px 40px;">
             <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.55);line-height:1.6;">
-              Join <strong style="color:#ffffff;">${safeEmoji} ${safeName}</strong> on Splittr to split bills and settle up — no awkward math, no spreadsheets.
+              Join <strong style="color:#ffffff;">${safeName}</strong> on Splittr to split bills and settle up — no awkward math, no spreadsheets.
             </p>
           </td>
         </tr>

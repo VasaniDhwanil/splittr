@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Receipt, Users, Calculator, Share2, ChevronRight, Loader2, Sparkles, X, Eye, EyeOff, CheckCircle2, Clock, Plus, Wallet } from 'lucide-react';
+import { Receipt, Users, Calculator, Share2, ChevronRight, Loader2, X, Eye, EyeOff, CheckCircle2, Clock, Plus, Wallet } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatCurrency } from '@/lib/calculations';
@@ -60,7 +60,6 @@ export default function Home() {
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
-  const [newGroupEmoji, setNewGroupEmoji] = useState('👥');
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
 
   // Safety net: if the user started joining a group but the sign-in flow
@@ -236,12 +235,11 @@ export default function Home() {
       const res = await fetch('/api/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newGroupName, emoji: newGroupEmoji }),
+        body: JSON.stringify({ name: newGroupName }),
       });
       if (!res.ok) throw new Error('Failed to create group');
       setShowCreateGroup(false);
       setNewGroupName('');
-      setNewGroupEmoji('👥');
       toast.success('Group created!');
       await fetchGroups();
     } catch {
@@ -301,8 +299,8 @@ export default function Home() {
   const displayedBills = showHidden ? allBills : visibleBills;
 
   return (
-    <main className="relative min-h-screen">
-      <div className="container mx-auto px-4 py-16">
+    <main className="relative min-h-dvh">
+      <div className="container mx-auto px-4 pt-6 pb-16 sm:pt-10">
 
         {/* Nav */}
         <div className="flex justify-end mb-8">
@@ -337,7 +335,6 @@ export default function Home() {
         <div className="relative text-center mb-16">
           <div className="relative z-10">
             <div className="inline-flex items-center gap-2 bg-white/5 backdrop-blur-sm text-white/60 px-4 py-2 rounded-full text-sm font-medium mb-8 border border-white/10">
-              <Sparkles className="h-4 w-4" />
               No app download needed
             </div>
             <h1 className="text-6xl sm:text-7xl md:text-8xl font-bold mb-6 tracking-tight">
@@ -510,7 +507,9 @@ export default function Home() {
                     <CardContent className="py-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <span className="text-2xl">{group.emoji}</span>
+                          <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                            <Users className="h-5 w-5 text-white/50" />
+                          </div>
                           <div>
                             <h3 className="font-semibold text-white">{group.name}</h3>
                             <p className="text-sm text-white/40">
@@ -642,25 +641,6 @@ export default function Home() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            <div className="space-y-2">
-              <Label className="text-white/70">Emoji</Label>
-              <div className="flex flex-wrap gap-2">
-                {['👥', '🏠', '✈️', '🎉', '🍕', '⛺', '💼', '🏖️'].map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => setNewGroupEmoji(emoji)}
-                    className={`w-11 h-11 rounded-xl text-xl flex items-center justify-center border transition-smooth ${
-                      newGroupEmoji === emoji
-                        ? 'border-white/60 bg-white/10'
-                        : 'border-white/10 bg-white/5 hover:bg-white/10'
-                    }`}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            </div>
             <div className="space-y-2">
               <Label htmlFor="newGroupName" className="text-white/70">Name</Label>
               <Input

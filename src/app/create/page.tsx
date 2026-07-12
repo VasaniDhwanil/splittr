@@ -252,7 +252,7 @@ export default function CreatePage() {
   };
 
   return (
-    <main className="min-h-screen py-8">
+    <main className="min-h-dvh py-8">
       <div className="container mx-auto px-4 max-w-2xl">
         <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -555,7 +555,7 @@ export default function CreatePage() {
                             : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
                         }`}
                       >
-                        {group.emoji} {group.name}
+                        {group.name}
                       </button>
                     ))}
                   </div>
