@@ -21,6 +21,7 @@ import {
   Copy,
   Share2,
   Check,
+  X,
   Users,
   Loader2,
   CheckCircle2,
@@ -69,6 +70,11 @@ export default function BillPage() {
   const [joinName, setJoinName] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
+  // Same name already on the bill (joined from another device?) — confirm
+  const [duplicateCandidate, setDuplicateCandidate] = useState<Participant | null>(null);
+  // Creator removing a participant
+  const [removeTarget, setRemoveTarget] = useState<Participant | null>(null);
+  const [isRemoving, setIsRemoving] = useState(false);
 
   const [splits, setSplits] = useState<ParticipantSplit[]>([]);
   const [copied, setCopied] = useState(false);
@@ -286,6 +292,16 @@ export default function BillPage() {
     setHasCreatorToken(Boolean(localStorage.getItem(`splittr-creator-token-${bill.id}`)));
   }, [bill, participants]);
 
+  // If the creator removed us (or our row vanished), reset to the join state
+  useEffect(() => {
+    if (!bill || !currentParticipant || participants.length === 0) return;
+    if (!participants.some((p) => p.id === currentParticipant.id)) {
+      setCurrentParticipant(null);
+      localStorage.removeItem(`splittr-participant-${bill.id}`);
+      toast.info('You were removed from this bill by the host.');
+    }
+  }, [bill, participants, currentParticipant]);
+
   // Recognize signed-in users across devices: if their account already has a
   // participant row on this bill, adopt it instead of asking them to join.
   useEffect(() => {
@@ -330,8 +346,32 @@ export default function BillPage() {
     'X-Creator-Token': bill ? localStorage.getItem(`splittr-creator-token-${bill.id}`) || '' : '',
   });
 
-  const handleJoin = async () => {
+  /** Re-attach to an existing participant (same person, another device). */
+  const adoptParticipant = (p: Participant) => {
+    if (!bill) return;
+    setCurrentParticipant(p);
+    localStorage.setItem(`splittr-participant-${bill.id}`, p.id);
+    setShowJoinDialog(false);
+    setDuplicateCandidate(null);
+    setJoinName('');
+    toast.success(`Welcome back, ${p.name}!`);
+  };
+
+  const handleJoin = async (forceNew = false) => {
     if (!joinName.trim() || !bill) return;
+
+    // Same name already on the bill? Probably the same person on a second
+    // device — confirm before creating a duplicate.
+    if (!forceNew) {
+      const existing = participants.find(
+        (p) => p.name.trim().toLowerCase() === joinName.trim().toLowerCase()
+      );
+      if (existing) {
+        setDuplicateCandidate(existing);
+        return;
+      }
+    }
+    setDuplicateCandidate(null);
 
     setIsJoining(true);
     try {
@@ -373,6 +413,29 @@ export default function BillPage() {
       toast.error('Failed to join bill');
     } finally {
       setIsJoining(false);
+    }
+  };
+
+  const handleRemoveParticipant = async () => {
+    if (!removeTarget || !bill) return;
+    setIsRemoving(true);
+    try {
+      const res = await fetch(`/api/participants?participant_id=${removeTarget.id}`, {
+        method: 'DELETE',
+        headers: creatorHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to remove');
+        return;
+      }
+      toast.success(`${removeTarget.name} removed — their items are up for grabs again`);
+      setRemoveTarget(null);
+      await fetchBill();
+    } catch {
+      toast.error('Failed to remove');
+    } finally {
+      setIsRemoving(false);
     }
   };
 
@@ -956,21 +1019,52 @@ export default function BillPage() {
                           id="joinName"
                           placeholder="e.g., Alex"
                           value={joinName}
-                          onChange={(e) => setJoinName(e.target.value)}
+                          onChange={(e) => {
+                            setJoinName(e.target.value);
+                            setDuplicateCandidate(null);
+                          }}
                           onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
                           className="text-lg"
                         />
                       </div>
-                      <Button onClick={handleJoin} className="w-full" size="lg" disabled={isJoining}>
-                        {isJoining ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Joining...
-                          </>
-                        ) : (
-                          "Let's go!"
-                        )}
-                      </Button>
+                      {duplicateCandidate ? (
+                        <div className="space-y-3">
+                          <p className="text-sm text-muted-foreground">
+                            Someone named{' '}
+                            <span className="text-foreground font-medium">{duplicateCandidate.name}</span>{' '}
+                            is already on this bill — maybe you, from another device. Is that you?
+                          </p>
+                          <Button
+                            className="w-full"
+                            size="lg"
+                            onClick={() => adoptParticipant(duplicateCandidate)}
+                          >
+                            Yes, that&apos;s me
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="w-full"
+                            onClick={() => handleJoin(true)}
+                            disabled={isJoining}
+                          >
+                            {isJoining ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : null}
+                            No, I&apos;m a different {duplicateCandidate.name}
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button onClick={() => handleJoin()} className="w-full" size="lg" disabled={isJoining}>
+                          {isJoining ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Joining...
+                            </>
+                          ) : (
+                            "Let's go!"
+                          )}
+                        </Button>
+                      )}
                     </div>
                   </DialogContent>
                 </Dialog>
@@ -994,11 +1088,21 @@ export default function BillPage() {
                     <AvatarInitials name={p.name} size="sm" />
                     <span className="text-sm font-medium">
                       {p.name}
-                      {p.is_creator && ' ✨'}
+                      {p.is_creator && ' (host)'}
                       {isMe && ' (you)'}
                     </span>
                     {!p.is_creator && p.payment_status === 'paid' && (
                       <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
+                    )}
+                    {isCreator && !p.is_creator && (
+                      <button
+                        type="button"
+                        title={`Remove ${p.name}`}
+                        onClick={() => setRemoveTarget(p)}
+                        className="ml-0.5 -mr-1 rounded-full p-0.5 text-white/40 hover:text-red-400 hover:bg-white/10 transition-smooth"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                     )}
                   </div>
                 );
@@ -1776,6 +1880,31 @@ export default function BillPage() {
           </DialogContent>
         </Dialog>
 
+        {/* Remove participant dialog */}
+        <Dialog open={Boolean(removeTarget)} onOpenChange={(open) => !open && setRemoveTarget(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Remove {removeTarget?.name}?</DialogTitle>
+              <DialogDescription>
+                Their claimed items go back up for grabs and their share is recalculated away.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setRemoveTarget(null)}
+                disabled={isRemoving}
+              >
+                Cancel
+              </Button>
+              <Button variant="destructive" className="flex-1" onClick={handleRemoveParticipant} disabled={isRemoving}>
+                {isRemoving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Remove
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </main>
   );

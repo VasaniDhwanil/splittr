@@ -224,3 +224,56 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// Remove a participant from a bill — bill creator only. Their claims
+// cascade-delete, so the removed person's items go back up for grabs.
+export async function DELETE(request: NextRequest) {
+  try {
+    const supabase = await createClient(); // auth (cookies) only
+    const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
+
+    const participant_id = new URL(request.url).searchParams.get('participant_id');
+    if (!participant_id) {
+      return NextResponse.json(
+        { error: 'participant_id is required' },
+        { status: 400 }
+      );
+    }
+
+    const { data: participant } = await db
+      .from('participants')
+      .select('id, bill_id, is_creator')
+      .eq('id', participant_id)
+      .maybeSingle();
+
+    if (!participant) {
+      return NextResponse.json({ error: 'Participant not found' }, { status: 404 });
+    }
+
+    const ownership = await requireBillOwnership(request, participant.bill_id, supabase);
+    if (!ownership.authorized) {
+      return NextResponse.json(
+        { error: 'Only the bill creator can remove people' },
+        { status: 403 }
+      );
+    }
+
+    if (participant.is_creator) {
+      return NextResponse.json(
+        { error: 'The host can’t be removed from their own bill' },
+        { status: 400 }
+      );
+    }
+
+    const { error } = await db.from('participants').delete().eq('id', participant_id);
+    if (error) {
+      console.error('Error removing participant:', error);
+      return NextResponse.json({ error: 'Failed to remove participant' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error in participants DELETE:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

@@ -107,6 +107,15 @@ GPID=$(post - $BASE/api/participants "$(json bill_id=$BILL name=Latecomer)" > /d
 check "exhausted item -> 400"        400 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT2 share=1)")"
 check "host unclaims"                200 "$(curl -s -b $WORK/host -o /dev/null -w %{http_code} -X DELETE "$BASE/api/claims?participant_id=$HPID&item_id=$IT1")"
 
+echo; echo "== participant removal (creator only) =="
+CREATORP=$(python3 -c "import json;d=json.load(open('$WORK/bill'));print([p['id'] for p in d['participants'] if p['is_creator']][0])")
+check "non-creator remove -> 403"    403 "$(curl -s -b $WORK/host -o /dev/null -w %{http_code} -X DELETE "$BASE/api/participants?participant_id=$GPID")"
+check "anon remove -> 403"           403 "$(curl -s -o /dev/null -w %{http_code} -X DELETE "$BASE/api/participants?participant_id=$GPID")"
+check "creator removes guest -> 200" 200 "$(curl -s -o /dev/null -w %{http_code} -X DELETE "$BASE/api/participants?participant_id=$GPID" -H "X-Creator-Token: $CTOKEN")"
+check "removed participant is gone"  "" "$(curl -s $BASE/api/bills/$BILL | python3 -c "import json,sys;d=json.load(sys.stdin);print(''.join(p['id'] for p in d['participants'] if p['id']=='$GPID'))")"
+check "remove host -> 400"           400 "$(curl -s -o /dev/null -w %{http_code} -X DELETE "$BASE/api/participants?participant_id=$CREATORP" -H "X-Creator-Token: $CTOKEN")"
+check "remove unknown -> 404"        404 "$(curl -s -o /dev/null -w %{http_code} -X DELETE "$BASE/api/participants?participant_id=00000000-0000-0000-0000-000000000000" -H "X-Creator-Token: $CTOKEN")"
+
 echo; echo "== bill ownership & cleanup =="
 check "PATCH without token -> 403"   403 "$(curl -s -o /dev/null -w %{http_code} -X PATCH $BASE/api/bills/$BILL -H 'Content-Type: application/json' -d "$(json name=Hacked)")"
 check "non-creator DELETE -> 403"    403 "$(curl -s -b $WORK/host -o /dev/null -w %{http_code} -X DELETE $BASE/api/bills/$BILL)"
