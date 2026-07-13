@@ -37,3 +37,20 @@ t = totals([c('pa', 'i2', 2), c('pb', 'i2', 2)], [beers], beerBill);
 console.log('overclaimed beers:', t); if (t.pa !== 9 || t.pb !== 9) { console.log('FAIL 5'); process.exit(1); }
 
 console.log('ALL PASS');
+
+// 6. THE FRIES CASE: qty-2 fries @ $5, I take one whole + we split the second.
+//    A claims 1½, B claims ½ -> A pays $7.50, B pays $2.50.
+const fries: BillItem = { id: 'i3', bill_id: 'b', name: 'Fries', price: 5, quantity: 2, created_at: '' };
+const friesBill = { ...bill, subtotal: 10 };
+t = totals([c('pa', 'i3', 1.5), c('pb', 'i3', 0.5)], [fries], friesBill);
+console.log('1½ + ½ fries:', t); if (Math.abs(t.pa - 7.5) > 0.01 || Math.abs(t.pb - 2.5) > 0.01) { console.log('FAIL 6'); process.exit(1); }
+
+// 7. Two people split ONE of two fries, second unclaimed: ½ each of one unit = $2.50 each
+t = totals([c('pa', 'i3', 0.5), c('pb', 'i3', 0.5)], [fries], friesBill);
+console.log('½ + ½ of one fries:', t); if (Math.abs(t.pa - 2.5) > 0.01 || Math.abs(t.pb - 2.5) > 0.01) { console.log('FAIL 7'); process.exit(1); }
+
+// 8. Thirds of one unit: ⅓ + ⅔ of one fries = $1.65 / $3.35
+t = totals([c('pa', 'i3', 0.33), c('pb', 'i3', 0.67)], [fries], friesBill);
+console.log('⅓ + ⅔ of one fries:', t); if (Math.abs(t.pa - 1.65) > 0.01 || Math.abs(t.pb - 3.35) > 0.01) { console.log('FAIL 8'); process.exit(1); }
+
+console.log('FRACTIONAL QUANTITY PASS');

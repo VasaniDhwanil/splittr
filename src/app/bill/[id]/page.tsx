@@ -36,7 +36,7 @@ import {
   ExternalLink,
   SearchX,
 } from 'lucide-react';
-import { formatCurrency, calculateSplits, billTotal, formatShare } from '@/lib/calculations';
+import { formatCurrency, calculateSplits, billTotal, formatShare, formatQuantity } from '@/lib/calculations';
 import { getPaymentOptions, billHasPaymentMethods } from '@/lib/payment-links';
 import { Bill, BillItem, Participant, ItemClaim, ParticipantSplit, SplitMode, TipSplit } from '@/types';
 import { createClient } from '@/lib/supabase/client';
@@ -552,7 +552,7 @@ export default function BillPage() {
           share: quantity,
         }),
       });
-      toast.success(`Claimed ${quantity} of ${quantityPickerItem.quantity}!`);
+      toast.success(`Claimed ${formatQuantity(quantity)} of ${quantityPickerItem.quantity}!`);
       await fetchBill(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
     } catch (error) {
       console.error('Error claiming:', error);
@@ -1550,27 +1550,60 @@ export default function BillPage() {
               <DialogDescription>
                 {quantityPickerItem && (
                   <>
-                    {quantityPickerItem.name} — {getRemainingQuantity(quantityPickerItem)} of {quantityPickerItem.quantity} available
+                    {quantityPickerItem.name} — {formatQuantity(getRemainingQuantity(quantityPickerItem))} of {quantityPickerItem.quantity} available. Sharing one? Pick a fraction.
                   </>
                 )}
               </DialogDescription>
             </DialogHeader>
             {quantityPickerItem && (() => {
               const remaining = getRemainingQuantity(quantityPickerItem);
-              const buttonSize = remaining <= 2 ? 'w-20 h-20 text-2xl' : remaining <= 4 ? 'w-16 h-16 text-xl' : 'w-14 h-14 text-lg';
+              // Half-step ladder (½, 1, 1½, 2 …) up to 3, then whole numbers —
+              // so two people can split one unit of a multi-quantity item.
+              const steps: number[] = [];
+              for (let v = 0.5; v <= Math.min(remaining, 3) + 1e-9; v += 0.5) {
+                steps.push(Math.round(v * 100) / 100);
+              }
+              for (let v = 4; v <= remaining + 1e-9; v += 1) steps.push(v);
+              const buttonSize = steps.length <= 3 ? 'w-20 h-20 text-2xl' : steps.length <= 5 ? 'w-16 h-16 text-xl' : 'w-14 h-14 text-lg';
+              const canThird = remaining >= 1 / 3 - 0.01;
+              const canTwoThirds = remaining >= 2 / 3 - 0.01;
               return (
-                <div className="flex flex-wrap justify-center gap-3 pt-4">
-                  {Array.from({ length: remaining }, (_, i) => i + 1).map((num) => (
-                    <Button
-                      key={num}
-                      variant="outline"
-                      className={`${buttonSize} font-semibold transition-smooth hover:scale-105 hover:bg-primary hover:text-primary-foreground rounded-xl`}
-                      onClick={() => handleQuantityClaim(num)}
-                    >
-                      {num}
-                    </Button>
-                  ))}
-                </div>
+                <>
+                  <div className="flex flex-wrap justify-center gap-3 pt-4">
+                    {steps.map((num) => (
+                      <Button
+                        key={num}
+                        variant="outline"
+                        className={`${buttonSize} font-semibold transition-smooth hover:scale-105 hover:bg-primary hover:text-primary-foreground rounded-xl`}
+                        onClick={() => handleQuantityClaim(num)}
+                      >
+                        {formatQuantity(num)}
+                      </Button>
+                    ))}
+                  </div>
+                  {canThird && (
+                    <div className="flex justify-center gap-3 pt-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:text-foreground"
+                        onClick={() => handleQuantityClaim(0.33)}
+                      >
+                        ⅓ of one
+                      </Button>
+                      {canTwoThirds && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={() => handleQuantityClaim(0.67)}
+                        >
+                          ⅔ of one
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </>
               );
             })()}
             <p className="text-sm text-muted-foreground text-center mt-2">

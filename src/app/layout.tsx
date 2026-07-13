@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { AnimatedBackground } from "@/components/ui/animated-background";
+import { ScrollReset } from "@/components/scroll-reset";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -44,9 +45,13 @@ export default function RootLayout({
         className="antialiased bg-background"
       >
         <AnimatedBackground />
-        <div className="relative z-10">
+        {/* App shell: the document never scrolls — this container does. Fixed
+            elements (bottom bar, dialogs) stay glued instead of riding the
+            iOS rubber-band bounce. */}
+        <div id="app-scroll" className="relative z-10 h-dvh overflow-y-auto overscroll-y-contain">
           {children}
         </div>
+        <ScrollReset />
         <Toaster />
       </body>
     </html>

@@ -124,9 +124,14 @@
        and bouncing past the page edges just exposes it — disable that. */
     background-color: #000;
     overscroll-behavior-y: none;
+    height: 100%;
   }
   body {
     @apply bg-background text-foreground;
+    /* The document itself never scrolls (see #app-scroll in layout.tsx) —
+       this is what keeps fixed elements from drifting during iOS bounce. */
+    height: 100%;
+    overflow: hidden;
   }
 }
 

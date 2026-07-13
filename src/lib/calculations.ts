@@ -116,10 +116,26 @@ export function formatCurrency(amount: number): string {
 
 export function formatShare(share: number): string {
   if (share === 1) return 'Full';
+  if (share > 1) return formatQuantity(share); // e.g. 1½ of a multi-quantity item
   if (share === 0.75) return '¾';
   if (Math.abs(share - 2 / 3) < 0.01) return '⅔';
   if (share === 0.5) return '½';
   if (Math.abs(share - 1 / 3) < 0.01) return '⅓';
   if (share === 0.25) return '¼';
   return `${Math.round(share * 100)}%`;
+}
+
+/** "0.5" -> "½", "1.5" -> "1½", "2" -> "2" — for quantity-style amounts. */
+export function formatQuantity(value: number): string {
+  const whole = Math.floor(value + 1e-9);
+  const frac = value - whole;
+  let glyph = '';
+  if (Math.abs(frac - 0.5) < 0.05) glyph = '½';
+  else if (Math.abs(frac - 1 / 3) < 0.05) glyph = '⅓';
+  else if (Math.abs(frac - 2 / 3) < 0.05) glyph = '⅔';
+  else if (Math.abs(frac - 0.25) < 0.05) glyph = '¼';
+  else if (Math.abs(frac - 0.75) < 0.05) glyph = '¾';
+  else if (frac > 0.01) return String(Math.round(value * 100) / 100);
+  if (whole === 0) return glyph || '0';
+  return `${whole}${glyph}`;
 }
