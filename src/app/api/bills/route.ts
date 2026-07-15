@@ -59,8 +59,18 @@ export async function POST(request: NextRequest) {
     // Calculate subtotal from items
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-    // Calculate tip amount
-    const tip_amount = (subtotal + tax) * (tip_percent / 100);
+    // Tip: an explicit dollar amount wins; otherwise derived from percent.
+    // The stored percent is kept in sync either way (it drives display and
+    // recomputes when items change).
+    let effectiveTipPercent = tip_percent;
+    let tip_amount: number;
+    if (body.tip_amount !== undefined && body.tip_amount !== null && body.tip_amount !== '') {
+      tip_amount = Math.round(clampNumber(body.tip_amount, 0, LIMITS.maxTax) * 100) / 100;
+      effectiveTipPercent =
+        subtotal + tax > 0 ? Math.round((tip_amount / (subtotal + tax)) * 1000) / 10 : 0;
+    } else {
+      tip_amount = (subtotal + tax) * (tip_percent / 100);
+    }
 
     // Generate creator token (returned once, stored for ownership verification)
     const creator_token = randomBytes(32).toString('base64url');
@@ -129,7 +139,7 @@ export async function POST(request: NextRequest) {
         name,
         subtotal,
         tax,
-        tip_percent,
+        tip_percent: effectiveTipPercent,
         tip_amount,
         short_code,
         status: 'active',

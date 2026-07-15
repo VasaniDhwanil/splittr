@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { participant_id, item_id } = body;
-    const share = clampNumber(body.share ?? 1.0, 0.01, LIMITS.maxShare);
+    let share = clampNumber(body.share ?? 1.0, 0.01, LIMITS.maxShare);
 
     if (!participant_id || !item_id) {
       return NextResponse.json(
@@ -36,22 +36,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // The UI checks remaining quantity, but the API must too: total claimed
-    // shares can never exceed the item's quantity (this caller's own claim is
-    // replaced by the upsert, so it doesn't count against the budget).
-    const { data: itemClaims } = await db
-      .from('item_claims')
-      .select('participant_id, share')
-      .eq('item_id', item_id);
-    const othersTotal = (itemClaims || [])
-      .filter((c) => c.participant_id !== participant_id)
-      .reduce((sum, c) => sum + Number(c.share), 0);
-    if (othersTotal + share > Number(item.quantity) + 1e-9) {
-      const remaining = Math.max(0, Number(item.quantity) - othersTotal);
-      return NextResponse.json(
-        { error: remaining > 0 ? `Only ${remaining} left to claim` : 'All claimed already' },
-        { status: 400 }
-      );
+    if (Number(item.quantity) === 1) {
+      // Single item: overlapping claims are HOW people split it — tapping an
+      // item someone already took joins the split, and the math normalizes
+      // everyone's portions against each other. Just cap a single person's
+      // claim at the whole item so one caller can't skew the ratio.
+      share = Math.min(share, 1);
+    } else {
+      // Multi-quantity items: shares are physical units, so the total can
+      // never exceed what's on the bill (this caller's own claim is replaced
+      // by the upsert, so it doesn't count against the budget).
+      const { data: itemClaims } = await db
+        .from('item_claims')
+        .select('participant_id, share')
+        .eq('item_id', item_id);
+      const othersTotal = (itemClaims || [])
+        .filter((c) => c.participant_id !== participant_id)
+        .reduce((sum, c) => sum + Number(c.share), 0);
+      if (othersTotal + share > Number(item.quantity) + 1e-9) {
+        const remaining = Math.max(0, Number(item.quantity) - othersTotal);
+        return NextResponse.json(
+          {
+            error:
+              remaining > 0
+                ? `Only ${remaining} left to claim`
+                : 'All claimed already',
+          },
+          { status: 400 }
+        );
+      }
     }
 
     // Upsert the claim (update if exists, insert if not)

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -104,6 +104,7 @@ export default function BillPage() {
   const [editItems, setEditItems] = useState<EditableItem[]>([]);
   const [editTax, setEditTax] = useState(0);
   const [editTipPercent, setEditTipPercent] = useState(18);
+  const [editTipExact, setEditTipExact] = useState(''); // non-empty = exact $ tip, overrides %
   const [editTipSplit, setEditTipSplit] = useState<TipSplit>('proportional');
   const [editSplitMode, setEditSplitMode] = useState<SplitMode>('items');
   const [editVenmo, setEditVenmo] = useState('');
@@ -134,6 +135,14 @@ export default function BillPage() {
       setIsLoading(false);
     }
   }, [billId]);
+
+  // Realtime events arrive in bursts (8 people tapping = many channel
+  // callbacks) — coalesce them into one refetch instead of one each.
+  const fetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleFetch = useCallback(() => {
+    if (fetchTimer.current) clearTimeout(fetchTimer.current);
+    fetchTimer.current = setTimeout(() => fetchBill(), 250);
+  }, [fetchBill]);
 
   // Calculate splits whenever data changes
   useEffect(() => {
@@ -187,7 +196,7 @@ export default function BillPage() {
           filter: `bill_id=eq.${bill.id}`,
         },
         () => {
-          fetchBill();
+          scheduleFetch();
         }
       )
       .subscribe();
@@ -204,7 +213,7 @@ export default function BillPage() {
           filter: `id=eq.${bill.id}`,
         },
         () => {
-          fetchBill();
+          scheduleFetch();
         }
       )
       .subscribe();
@@ -221,7 +230,7 @@ export default function BillPage() {
           filter: `bill_id=eq.${bill.id}`,
         },
         () => {
-          fetchBill();
+          scheduleFetch();
         }
       )
       .subscribe();
@@ -242,7 +251,7 @@ export default function BillPage() {
               filter: `item_id=in.(${items.map(i => i.id).join(',')})`,
             },
             () => {
-              fetchBill();
+              scheduleFetch();
             }
           )
           .on(
@@ -254,7 +263,7 @@ export default function BillPage() {
               filter: `item_id=in.(${items.map(i => i.id).join(',')})`,
             },
             () => {
-              fetchBill();
+              scheduleFetch();
             }
           )
           .on(
@@ -265,7 +274,7 @@ export default function BillPage() {
               table: 'item_claims',
             },
             () => {
-              fetchBill();
+              scheduleFetch();
             }
           )
           .subscribe()
@@ -277,7 +286,7 @@ export default function BillPage() {
       supabase.removeChannel(itemsChannel);
       if (claimsChannel) supabase.removeChannel(claimsChannel);
     };
-  }, [bill, items, fetchBill]);
+  }, [bill, items, fetchBill, scheduleFetch]);
 
   // Check for saved participant + creator token in localStorage
   useEffect(() => {
@@ -457,16 +466,19 @@ export default function BillPage() {
       (c) => c.participant_id === me.id && c.item_id === item.id
     );
 
-    // If already claimed, unclaim
+    // If already claimed, unclaim (optimistically — restore on failure)
     if (existingClaim) {
       setClaimingItemId(item.id);
+      setClaims((prev) => prev.filter((c) => c.id !== existingClaim.id));
       try {
-        await fetch(`/api/claims?participant_id=${me.id}&item_id=${item.id}`, {
+        const res = await fetch(`/api/claims?participant_id=${me.id}&item_id=${item.id}`, {
           method: 'DELETE',
         });
+        if (!res.ok) throw new Error('Failed to unclaim');
         toast.success("Got it, you're off the hook!");
-        await fetchBill(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
+        scheduleFetch(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
       } catch (error) {
+        setClaims((prev) => [...prev, existingClaim]);
         console.error('Error unclaiming:', error);
         toast.error('Oops, something went wrong');
       } finally {
@@ -487,10 +499,19 @@ export default function BillPage() {
       return;
     }
 
-    // Claim directly
+    // Claim optimistically: the UI reflects the tap instantly and rolls
+    // back if the server disagrees.
     setClaimingItemId(item.id);
+    const optimistic: ItemClaim = {
+      id: `optimistic-${me.id}-${item.id}`,
+      participant_id: me.id,
+      item_id: item.id,
+      share: 1,
+      created_at: '',
+    };
+    setClaims((prev) => [...prev, optimistic]);
     try {
-      await fetch('/api/claims', {
+      const res = await fetch('/api/claims', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -499,11 +520,14 @@ export default function BillPage() {
           share: 1,
         }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to claim');
+      setClaims((prev) => prev.map((c) => (c.id === optimistic.id ? data : c)));
       toast.success('Nice pick!');
-      await fetchBill(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
+      scheduleFetch(); // reconcile totals in the background
     } catch (error) {
-      console.error('Error claiming:', error);
-      toast.error('Oops, something went wrong');
+      setClaims((prev) => prev.filter((c) => c.id !== optimistic.id));
+      toast.error(error instanceof Error ? error.message : 'Oops, something went wrong');
     } finally {
       setTimeout(() => setClaimingItemId(null), 300);
     }
@@ -516,7 +540,7 @@ export default function BillPage() {
     setClaimingItemId(portionPickerItem.id);
 
     try {
-      await fetch('/api/claims', {
+      const res = await fetch('/api/claims', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -525,6 +549,8 @@ export default function BillPage() {
           share: fraction,
         }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to claim');
       toast.success(`Got it — ${formatShare(fraction)} of ${portionPickerItem.name}`);
       await fetchBill();
     } catch (error) {
@@ -543,7 +569,7 @@ export default function BillPage() {
     setClaimingItemId(quantityPickerItem.id);
 
     try {
-      await fetch('/api/claims', {
+      const res = await fetch('/api/claims', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -552,6 +578,8 @@ export default function BillPage() {
           share: quantity,
         }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to claim');
       toast.success(`Claimed ${formatQuantity(quantity)} of ${quantityPickerItem.quantity}!`);
       await fetchBill(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
     } catch (error) {
@@ -673,6 +701,7 @@ export default function BillPage() {
     setEditItems(items.map((i) => ({ id: i.id, name: i.name, price: i.price, quantity: i.quantity })));
     setEditTax(bill.tax);
     setEditTipPercent(bill.tip_percent);
+    setEditTipExact('');
     setEditTipSplit(bill.tip_split || 'proportional');
     setEditSplitMode(bill.split_mode || 'items');
     setEditVenmo(bill.venmo_handle || '');
@@ -704,6 +733,7 @@ export default function BillPage() {
           items: validItems,
           tax: editTax,
           tip_percent: editTipPercent,
+          ...(editTipExact !== '' ? { tip_amount: Math.max(0, parseFloat(editTipExact) || 0) } : {}),
           tip_split: editTipSplit,
           split_mode: editSplitMode,
           venmo_handle: editVenmo,
@@ -1750,7 +1780,23 @@ export default function BillPage() {
                     type="number"
                     step="1"
                     value={editTipPercent || ''}
-                    onChange={(e) => setEditTipPercent(parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      setEditTipPercent(parseFloat(e.target.value) || 0);
+                      setEditTipExact('');
+                    }}
+                  />
+                </div>
+                <div className="space-y-2 flex-1">
+                  <Label htmlFor="editTipExact">Tip $ (exact)</Label>
+                  <Input
+                    id="editTipExact"
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    placeholder="overrides %"
+                    value={editTipExact}
+                    onChange={(e) => setEditTipExact(e.target.value)}
                   />
                 </div>
               </div>

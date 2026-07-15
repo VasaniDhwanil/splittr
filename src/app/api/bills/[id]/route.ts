@@ -276,11 +276,19 @@ export async function PATCH(
     const newTax = tax !== undefined ? Math.round(clampNumber(tax, 0, LIMITS.maxTax) * 100) / 100 : bill.tax;
     if (tax !== undefined) updateData.tax = newTax;
 
-    // Recompute tip whenever any of its inputs changed
-    const newTipPercent = tip_percent !== undefined ? clampNumber(tip_percent, 0, LIMITS.maxTipPercent) : bill.tip_percent;
-    if (tip_percent !== undefined) updateData.tip_percent = newTipPercent;
-    if (tip_percent !== undefined || tax !== undefined || items !== undefined) {
-      updateData.tip_amount = (subtotal + newTax) * (newTipPercent / 100);
+    // Recompute tip whenever any of its inputs changed. An explicit dollar
+    // tip_amount wins over the percent; the percent is re-derived from it.
+    if (body.tip_amount !== undefined && body.tip_amount !== null && body.tip_amount !== '') {
+      const amt = Math.round(clampNumber(body.tip_amount, 0, LIMITS.maxTax) * 100) / 100;
+      updateData.tip_amount = amt;
+      updateData.tip_percent =
+        subtotal + newTax > 0 ? Math.round((amt / (subtotal + newTax)) * 1000) / 10 : 0;
+    } else {
+      const newTipPercent = tip_percent !== undefined ? clampNumber(tip_percent, 0, LIMITS.maxTipPercent) : bill.tip_percent;
+      if (tip_percent !== undefined) updateData.tip_percent = newTipPercent;
+      if (tip_percent !== undefined || tax !== undefined || items !== undefined) {
+        updateData.tip_amount = (subtotal + newTax) * (newTipPercent / 100);
+      }
     }
 
     const { data: updatedBill, error } = await db

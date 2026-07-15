@@ -105,6 +105,9 @@ check "over-claim (5 of 2) -> 400"   400 "$(post $WORK/host $BASE/api/claims "$(
 check "claim within quantity ok"     200 "$(post $WORK/host $BASE/api/claims "$(json participant_id=$HPID item_id=$IT2 share=2)")"
 GPID=$(post - $BASE/api/participants "$(json bill_id=$BILL name=Latecomer)" > /dev/null; field id < $WORK/last)
 check "exhausted item -> 400"        400 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT2 share=1)")"
+# Tap-to-split: a second FULL claim on a single-quantity item must be allowed —
+# that's how two people split one dish (the math normalizes the overlap).
+check "tap-to-split taken qty-1 item -> 200" 200 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT1 share=1)")"
 check "host unclaims"                200 "$(curl -s -b $WORK/host -o /dev/null -w %{http_code} -X DELETE "$BASE/api/claims?participant_id=$HPID&item_id=$IT1")"
 
 echo; echo "== participant removal (creator only) =="
@@ -115,6 +118,15 @@ check "creator removes guest -> 200" 200 "$(curl -s -o /dev/null -w %{http_code}
 check "removed participant is gone"  "" "$(curl -s $BASE/api/bills/$BILL | python3 -c "import json,sys;d=json.load(sys.stdin);print(''.join(p['id'] for p in d['participants'] if p['id']=='$GPID'))")"
 check "remove host -> 400"           400 "$(curl -s -o /dev/null -w %{http_code} -X DELETE "$BASE/api/participants?participant_id=$CREATORP" -H "X-Creator-Token: $CTOKEN")"
 check "remove unknown -> 404"        404 "$(curl -s -o /dev/null -w %{http_code} -X DELETE "$BASE/api/participants?participant_id=00000000-0000-0000-0000-000000000000" -H "X-Creator-Token: $CTOKEN")"
+
+echo; echo "== custom dollar tip =="
+post - $BASE/api/bills "$(json name='Tip exact' creator_name=Tipper tax=0 tip_percent=18 tip_amount=7 items='[{"name":"x","price":20,"quantity":1}]')" > /dev/null
+TIPBILL=$(field id < "$WORK/last"); TIPCT=$(cat "$WORK/last" | field creator_token)
+check "exact \$7 tip beats the 18%"  "7" "$(curl -s $BASE/api/bills/$TIPBILL | field tip_amount)"
+check "percent re-derived (35%)"     "35" "$(curl -s $BASE/api/bills/$TIPBILL | field tip_percent)"
+check "PATCH exact tip to \$5"       200 "$(curl -s -o /dev/null -w %{http_code} -X PATCH $BASE/api/bills/$TIPBILL -H "X-Creator-Token: $TIPCT" -H 'Content-Type: application/json' -d '{"tip_amount":5}')"
+check "tip now \$5"                  "5" "$(curl -s $BASE/api/bills/$TIPBILL | field tip_amount)"
+curl -s -o /dev/null -X DELETE $BASE/api/bills/$TIPBILL -H "X-Creator-Token: $TIPCT"
 
 echo; echo "== bill ownership & cleanup =="
 check "PATCH without token -> 403"   403 "$(curl -s -o /dev/null -w %{http_code} -X PATCH $BASE/api/bills/$BILL -H 'Content-Type: application/json' -d "$(json name=Hacked)")"

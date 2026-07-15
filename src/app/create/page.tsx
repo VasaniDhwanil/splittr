@@ -48,6 +48,7 @@ export default function CreatePage() {
 
   const [splitMode, setSplitMode] = useState<SplitMode>('items');
   const [tipSplit, setTipSplit] = useState<TipSplit>('proportional');
+  const [customTip, setCustomTip] = useState(''); // non-empty = exact $ tip, overrides %
   const [venmoHandle, setVenmoHandle] = useState('');
   const [cashappHandle, setCashappHandle] = useState('');
   const [paypalHandle, setPaypalHandle] = useState('');
@@ -60,7 +61,8 @@ export default function CreatePage() {
   const [paidByUserId, setPaidByUserId] = useState<string | null>(null); // null = I paid
 
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const tipAmount = (subtotal + tax) * (tipPercent / 100);
+  const tipAmount =
+    customTip !== '' ? Math.max(0, parseFloat(customTip) || 0) : (subtotal + tax) * (tipPercent / 100);
   const total = subtotal + tax + tipAmount;
 
   // Prefill payment handles from the last bill; load groups if signed in
@@ -215,6 +217,7 @@ export default function CreatePage() {
           items,
           tax,
           tip_percent: tipPercent,
+          ...(customTip !== '' ? { tip_amount: Math.max(0, parseFloat(customTip) || 0) } : {}),
           creator_name: creatorName,
           split_mode: splitMode,
           tip_split: tipSplit,
@@ -439,18 +442,34 @@ export default function CreatePage() {
                   </div>
                 </div>
                 <div className="flex justify-between items-center gap-2 flex-wrap">
-                  <Label htmlFor="tip">Tip %</Label>
-                  <div className="flex gap-2 flex-wrap justify-end">
+                  <Label htmlFor="tip">Tip</Label>
+                  <div className="flex gap-2 flex-wrap justify-end items-center">
                     {[0, 15, 18, 20, 25].map((pct) => (
                       <Button
                         key={pct}
                         size="sm"
-                        variant={tipPercent === pct ? 'default' : 'outline'}
-                        onClick={() => setTipPercent(pct)}
+                        variant={customTip === '' && tipPercent === pct ? 'default' : 'outline'}
+                        onClick={() => {
+                          setCustomTip('');
+                          setTipPercent(pct);
+                        }}
                       >
                         {pct}%
                       </Button>
                     ))}
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        placeholder="exact"
+                        value={customTip}
+                        onChange={(e) => setCustomTip(e.target.value)}
+                        className="h-9 w-24 pl-6"
+                      />
+                    </div>
                   </div>
                 </div>
                 <div className="flex justify-between items-center">
@@ -675,7 +694,7 @@ export default function CreatePage() {
                     <span>{formatCurrency(tax)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Tip ({tipPercent}%)</span>
+                    <span>Tip {customTip !== '' ? '(exact)' : `(${tipPercent}%)`}</span>
                     <span>{formatCurrency(tipAmount)}</span>
                   </div>
                   <Separator className="my-2" />
