@@ -1231,7 +1231,7 @@ export default function BillPage() {
                             <div className="text-xs text-muted-foreground">
                               {claimers.map((c, i) => (
                                 <span key={c.participant.id}>
-                                  {c.participant.name}: {c.share}
+                                  {c.participant.name}: {formatQuantity(c.share)}
                                   {i < claimers.length - 1 && ', '}
                                 </span>
                               ))}
@@ -1265,7 +1265,7 @@ export default function BillPage() {
                             <Check className="h-4 w-4" />
                             <span>
                               {item.quantity > 1
-                                ? `${myClaimShare}× = ${formatCurrency(myPortion)}`
+                                ? `${formatQuantity(myClaimShare)}× = ${formatCurrency(myPortion)}`
                                 : claimers.length === 1 && myClaimShare === 1
                                 ? 'Yours'
                                 : `${formatShare(myClaimShare / shareDenominator)} · ${formatCurrency(myPortion)}`}

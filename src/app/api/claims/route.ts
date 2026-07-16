@@ -53,8 +53,12 @@ export async function POST(request: NextRequest) {
       const othersTotal = (itemClaims || [])
         .filter((c) => c.participant_id !== participant_id)
         .reduce((sum, c) => sum + Number(c.share), 0);
-      if (othersTotal + share > Number(item.quantity) + 1e-9) {
-        const remaining = Math.max(0, Number(item.quantity) - othersTotal);
+      // Tolerance covers rounded fractions: three people each claiming ⅔
+      // (0.67) of a 2-quantity item sum to 2.01 — that's a legitimate
+      // three-way split, not an over-claim.
+      const EPSILON = 0.05;
+      if (othersTotal + share > Number(item.quantity) + EPSILON) {
+        const remaining = Math.round(Math.max(0, Number(item.quantity) - othersTotal) * 100) / 100;
         return NextResponse.json(
           {
             error:

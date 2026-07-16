@@ -105,6 +105,12 @@ check "over-claim (5 of 2) -> 400"   400 "$(post $WORK/host $BASE/api/claims "$(
 check "claim within quantity ok"     200 "$(post $WORK/host $BASE/api/claims "$(json participant_id=$HPID item_id=$IT2 share=2)")"
 GPID=$(post - $BASE/api/participants "$(json bill_id=$BILL name=Latecomer)" > /dev/null; field id < $WORK/last)
 check "exhausted item -> 400"        400 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT2 share=1)")"
+# Three people splitting 2 units as thirds: rounded ⅔ shares (0.67 x 3 = 2.01)
+# must not trip the guard — that phantom 0.01 is rounding, not an over-claim.
+TPID=$(post - $BASE/api/participants "$(json bill_id=$BILL name=Thirdsy)" > /dev/null; field id < $WORK/last)
+check "re-claim replaces own share"    200 "$(post $WORK/host $BASE/api/claims "$(json participant_id=$HPID item_id=$IT2 share=0.67)")"
+check "second third joins"             200 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT2 share=0.67)")"
+check "third third allowed (rounding)" 200 "$(post - $BASE/api/claims "$(json participant_id=$TPID item_id=$IT2 share=0.67)")"
 # Tap-to-split: a second FULL claim on a single-quantity item must be allowed —
 # that's how two people split one dish (the math normalizes the overlap).
 check "tap-to-split taken qty-1 item -> 200" 200 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT1 share=1)")"
