@@ -41,6 +41,7 @@ import { getPaymentOptions, billHasPaymentMethods } from '@/lib/payment-links';
 import { Bill, BillItem, Participant, ItemClaim, ParticipantSplit, SplitMode, TipSplit } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 import { AvatarInitials, AvatarStack, getPersonHex } from '@/components/avatar-initials';
+import { SplitSheet, SplitEntry } from '@/components/split-sheet';
 
 interface EditableItem {
   id?: string;
@@ -83,13 +84,10 @@ export default function BillPage() {
   const [hasShownConfetti, setHasShownConfetti] = useState(false);
   const [prevAllClaimed, setPrevAllClaimed] = useState(false);
 
-  // Quantity picker for multi-quantity items
-  const [quantityPickerItem, setQuantityPickerItem] = useState<BillItem | null>(null);
-  const [showQuantityPicker, setShowQuantityPicker] = useState(false);
-
-  // Portion picker for uneven splits of shared items (e.g. ⅔ of a pasta)
-  const [portionPickerItem, setPortionPickerItem] = useState<BillItem | null>(null);
-  const [showPortionPicker, setShowPortionPicker] = useState(false);
+  // The split sheet — the one surface for claiming and splitting items
+  const [splitItem, setSplitItem] = useState<BillItem | null>(null);
+  const [showSplitSheet, setShowSplitSheet] = useState(false);
+  const [isSplitting, setIsSplitting] = useState(false);
 
   // Bill status
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
@@ -157,7 +155,8 @@ export default function BillPage() {
         const totalClaimed = claims
           .filter((c) => c.item_id === item.id)
           .reduce((sum, c) => sum + c.share, 0);
-        return totalClaimed >= item.quantity;
+        // Small slack: a 12-way split of one item sums to 0.9996, not 1
+        return totalClaimed >= item.quantity - 0.01;
       });
 
       // Only show confetti when transitioning from not-all-claimed to all-claimed
@@ -448,7 +447,9 @@ export default function BillPage() {
     }
   };
 
-  const handleToggleClaim = async (item: BillItem) => {
+  // Every item tap opens the split sheet — the one surface for solo claims,
+  // group splits, and custom portions alike.
+  const handleItemTap = async (item: BillItem) => {
     if (splitMode !== 'items') return;
 
     // Signed-in users join silently under their known identity; the name
@@ -462,132 +463,74 @@ export default function BillPage() {
       }
     }
 
+    setSplitItem(item);
+    setShowSplitSheet(true);
+  };
+
+  const handleUnclaim = async (item: BillItem) => {
+    const me = currentParticipant;
+    if (!me) return;
     const existingClaim = claims.find(
       (c) => c.participant_id === me.id && c.item_id === item.id
     );
+    if (!existingClaim) return;
 
-    // If already claimed, unclaim (optimistically — restore on failure)
-    if (existingClaim) {
-      setClaimingItemId(item.id);
-      setClaims((prev) => prev.filter((c) => c.id !== existingClaim.id));
-      try {
-        const res = await fetch(`/api/claims?participant_id=${me.id}&item_id=${item.id}`, {
-          method: 'DELETE',
-        });
-        if (!res.ok) throw new Error('Failed to unclaim');
-        toast.success("Got it, you're off the hook!");
-        scheduleFetch(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
-      } catch (error) {
-        setClaims((prev) => [...prev, existingClaim]);
-        console.error('Error unclaiming:', error);
-        toast.error('Oops, something went wrong');
-      } finally {
-        setTimeout(() => setClaimingItemId(null), 300);
-      }
-      return;
-    }
-
-    // If multi-quantity item, show quantity picker
-    if (item.quantity > 1) {
-      const remaining = getRemainingQuantity(item);
-      if (remaining <= 0) {
-        toast.error('All claimed! Tap to see who has it.');
-        return;
-      }
-      setQuantityPickerItem(item);
-      setShowQuantityPicker(true);
-      return;
-    }
-
-    // Claim optimistically: the UI reflects the tap instantly and rolls
-    // back if the server disagrees.
+    // Unclaim optimistically — restore on failure
     setClaimingItemId(item.id);
-    const optimistic: ItemClaim = {
-      id: `optimistic-${me.id}-${item.id}`,
-      participant_id: me.id,
-      item_id: item.id,
-      share: 1,
-      created_at: '',
-    };
-    setClaims((prev) => [...prev, optimistic]);
+    setClaims((prev) => prev.filter((c) => c.id !== existingClaim.id));
     try {
-      const res = await fetch('/api/claims', {
+      const res = await fetch(`/api/claims?participant_id=${me.id}&item_id=${item.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to unclaim');
+      toast.success("Got it, you're off the hook!");
+      scheduleFetch(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
+    } catch (error) {
+      setClaims((prev) => [...prev, existingClaim]);
+      console.error('Error unclaiming:', error);
+      toast.error('Oops, something went wrong');
+    } finally {
+      setTimeout(() => setClaimingItemId(null), 300);
+    }
+  };
+
+  // One split action = one batch request; applied optimistically so the
+  // sheet's outcome is on screen before the server confirms it.
+  const handleSplitSubmit = async (item: BillItem, entries: SplitEntry[], message: string) => {
+    setIsSplitting(true);
+    const prevClaims = claims;
+    const entryPids = new Set(entries.map((e) => e.participant_id));
+    const optimistic: ItemClaim[] = entries.map((e) => ({
+      id: `optimistic-${e.participant_id}-${item.id}`,
+      participant_id: e.participant_id,
+      item_id: item.id,
+      share: e.share,
+      created_at: '',
+    }));
+    setClaims((prev) => [
+      ...prev.filter((c) => !(c.item_id === item.id && entryPids.has(c.participant_id))),
+      ...optimistic,
+    ]);
+    setClaimingItemId(item.id);
+    try {
+      const res = await fetch('/api/claims/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          participant_id: me.id,
-          item_id: item.id,
-          share: 1,
-        }),
+        body: JSON.stringify({ item_id: item.id, entries }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Failed to claim');
-      setClaims((prev) => prev.map((c) => (c.id === optimistic.id ? data : c)));
-      toast.success('Nice pick!');
-      scheduleFetch(); // reconcile totals in the background
+      if (!res.ok) throw new Error(data.error || 'Failed to split');
+      setShowSplitSheet(false);
+      setSplitItem(null);
+      toast.success(message);
+      scheduleFetch(); // reconcile with server truth in the background
     } catch (error) {
-      setClaims((prev) => prev.filter((c) => c.id !== optimistic.id));
+      // Roll back and keep the sheet open so the split can be adjusted
+      setClaims(prevClaims);
       toast.error(error instanceof Error ? error.message : 'Oops, something went wrong');
     } finally {
+      setIsSplitting(false);
       setTimeout(() => setClaimingItemId(null), 300);
-    }
-  };
-
-  const handlePortionClaim = async (fraction: number) => {
-    if (!currentParticipant || !portionPickerItem) return;
-
-    setShowPortionPicker(false);
-    setClaimingItemId(portionPickerItem.id);
-
-    try {
-      const res = await fetch('/api/claims', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          participant_id: currentParticipant.id,
-          item_id: portionPickerItem.id,
-          share: fraction,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Failed to claim');
-      toast.success(`Got it — ${formatShare(fraction)} of ${portionPickerItem.name}`);
-      await fetchBill();
-    } catch (error) {
-      console.error('Error updating portion:', error);
-      toast.error('Oops, something went wrong');
-    } finally {
-      setTimeout(() => setClaimingItemId(null), 300);
-      setPortionPickerItem(null);
-    }
-  };
-
-  const handleQuantityClaim = async (quantity: number) => {
-    if (!currentParticipant || !quantityPickerItem) return;
-
-    setShowQuantityPicker(false);
-    setClaimingItemId(quantityPickerItem.id);
-
-    try {
-      const res = await fetch('/api/claims', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          participant_id: currentParticipant.id,
-          item_id: quantityPickerItem.id,
-          share: quantity,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Failed to claim');
-      toast.success(`Claimed ${formatQuantity(quantity)} of ${quantityPickerItem.quantity}!`);
-      await fetchBill(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
-    } catch (error) {
-      console.error('Error claiming:', error);
-      toast.error('Oops, something went wrong');
-    } finally {
-      setTimeout(() => setClaimingItemId(null), 300);
-      setQuantityPickerItem(null);
     }
   };
 
@@ -809,13 +752,6 @@ export default function BillPage() {
       (c) => c.participant_id === currentParticipant.id && c.item_id === itemId
     );
     return claim?.share ?? null;
-  };
-
-  const getRemainingQuantity = (item: BillItem): number => {
-    const totalClaimed = claims
-      .filter((c) => c.item_id === item.id)
-      .reduce((sum, c) => sum + c.share, 0);
-    return Math.max(0, item.quantity - totalClaimed);
   };
 
   const isItemClaimedByMe = (itemId: string) => {
@@ -1150,7 +1086,7 @@ export default function BillPage() {
             <CardDescription>
               {splitMode === 'items'
                 ? currentParticipant
-                  ? "Tap the items you ordered. If others tap too, you'll split automatically!"
+                  ? 'Tap an item to claim it — or split it with anyone at the table.'
                   : 'Join the bill first, then tap your items.'
                 : splitMode === 'even'
                 ? `The total is split evenly between ${participants.length} ${participants.length === 1 ? 'person' : 'people'}.`
@@ -1171,6 +1107,15 @@ export default function BillPage() {
               // Calculate my portion of the item
               const myPortion = myClaimShare && shareDenominator > 0
                 ? (item.price * item.quantity * myClaimShare) / shareDenominator
+                : 0;
+
+              // Equal shares collapse to one line ("Split 3 ways — $2.67 each");
+              // per-person breakdowns are for uneven splits only
+              const equalSplit =
+                claimers.length > 1 &&
+                claimers.every((c) => Math.abs(c.share - claimers[0].share) < 0.005);
+              const equalPerHead = equalSplit
+                ? (item.price * item.quantity * claimers[0].share) / shareDenominator
                 : 0;
 
               // Tint the item with its claimers' colors — shared items blend
@@ -1201,7 +1146,7 @@ export default function BillPage() {
                       : ''
                   }`}
                   style={itemStyle}
-                  onClick={() => handleToggleClaim(item)}
+                  onClick={() => handleItemTap(item)}
                 >
                   <div className="flex justify-between items-start gap-3">
                     <div className="flex-1 min-w-0">
@@ -1221,33 +1166,41 @@ export default function BillPage() {
                             />
                             {item.quantity > 1 && totalShares > 0 && (
                               <span className="text-xs text-muted-foreground">
-                                {totalShares >= item.quantity
+                                {totalShares >= item.quantity - 0.01
                                   ? 'fully claimed'
-                                  : `${totalShares}/${item.quantity} claimed`}
+                                  : `${formatQuantity(totalShares)}/${item.quantity} claimed`}
                               </span>
                             )}
                           </div>
-                          {item.quantity > 1 && claimers.length > 0 && (
+                          {equalSplit ? (
                             <div className="text-xs text-muted-foreground">
-                              {claimers.map((c, i) => (
-                                <span key={c.participant.id}>
-                                  {c.participant.name}: {formatQuantity(c.share)}
-                                  {i < claimers.length - 1 && ', '}
-                                </span>
-                              ))}
+                              Split {claimers.length} ways · {formatCurrency(equalPerHead)} each
                             </div>
-                          )}
-                          {/* Uneven portions on a shared single item (e.g. ⅔ / ⅓ of a pasta) */}
-                          {item.quantity === 1 && totalShares > 0 &&
-                            (claimers.length > 1 || claimers.some((c) => c.share !== 1)) && (
-                            <div className="text-xs text-muted-foreground">
-                              {claimers.map((c, i) => (
-                                <span key={c.participant.id}>
-                                  {c.participant.name}: {formatShare(c.share / shareDenominator)}
-                                  {i < claimers.length - 1 && ' · '}
-                                </span>
-                              ))}
-                            </div>
+                          ) : (
+                            <>
+                              {item.quantity > 1 && claimers.length > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  {claimers.map((c, i) => (
+                                    <span key={c.participant.id}>
+                                      {c.participant.name}: {formatQuantity(c.share)}
+                                      {i < claimers.length - 1 && ', '}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {/* Uneven portions on a shared single item (e.g. ⅔ / ⅓ of a pasta) */}
+                              {item.quantity === 1 && totalShares > 0 &&
+                                (claimers.length > 1 || claimers.some((c) => c.share !== 1)) && (
+                                <div className="text-xs text-muted-foreground">
+                                  {claimers.map((c, i) => (
+                                    <span key={c.participant.id}>
+                                      {c.participant.name}: {formatShare(c.share / shareDenominator)}
+                                      {i < claimers.length - 1 && ' · '}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       )}
@@ -1271,19 +1224,16 @@ export default function BillPage() {
                                 : `${formatShare(myClaimShare / shareDenominator)} · ${formatCurrency(myPortion)}`}
                             </span>
                           </div>
-                          {item.quantity === 1 && (
-                            <button
-                              type="button"
-                              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground transition-smooth mt-1 py-1.5 px-2 -mr-2 touch-manipulation"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPortionPickerItem(item);
-                                setShowPortionPicker(true);
-                              }}
-                            >
-                              adjust my portion
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground transition-smooth mt-1 py-1.5 px-2 -mr-2 touch-manipulation"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUnclaim(item);
+                            }}
+                          >
+                            unclaim
+                          </button>
                         </>
                       )}
                     </div>
@@ -1572,115 +1522,20 @@ export default function BillPage() {
           </div>
         )}
 
-        {/* Quantity Picker Dialog */}
-        <Dialog open={showQuantityPicker} onOpenChange={setShowQuantityPicker}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>How many did you have?</DialogTitle>
-              <DialogDescription>
-                {quantityPickerItem && (
-                  <>
-                    {quantityPickerItem.name} — {formatQuantity(getRemainingQuantity(quantityPickerItem))} of {quantityPickerItem.quantity} available. Sharing one? Pick a fraction.
-                  </>
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            {quantityPickerItem && (() => {
-              const remaining = getRemainingQuantity(quantityPickerItem);
-              // Half-step ladder (½, 1, 1½, 2 …) up to 3, then whole numbers —
-              // so two people can split one unit of a multi-quantity item.
-              const steps: number[] = [];
-              for (let v = 0.5; v <= Math.min(remaining, 3) + 1e-9; v += 0.5) {
-                steps.push(Math.round(v * 100) / 100);
-              }
-              for (let v = 4; v <= remaining + 1e-9; v += 1) steps.push(v);
-              const buttonSize = steps.length <= 3 ? 'w-20 h-20 text-2xl' : steps.length <= 5 ? 'w-16 h-16 text-xl' : 'w-14 h-14 text-lg';
-              const canThird = remaining >= 1 / 3 - 0.01;
-              const canTwoThirds = remaining >= 2 / 3 - 0.01;
-              return (
-                <>
-                  <div className="flex flex-wrap justify-center gap-3 pt-4">
-                    {steps.map((num) => (
-                      <Button
-                        key={num}
-                        variant="outline"
-                        className={`${buttonSize} font-semibold transition-smooth hover:scale-105 hover:bg-primary hover:text-primary-foreground rounded-xl`}
-                        onClick={() => handleQuantityClaim(num)}
-                      >
-                        {formatQuantity(num)}
-                      </Button>
-                    ))}
-                  </div>
-                  {canThird && (
-                    <div className="flex justify-center gap-3 pt-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-muted-foreground hover:text-foreground"
-                        onClick={() => handleQuantityClaim(0.33)}
-                      >
-                        ⅓ of one
-                      </Button>
-                      {canTwoThirds && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-muted-foreground hover:text-foreground"
-                          onClick={() => handleQuantityClaim(0.67)}
-                        >
-                          ⅔ of one
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-            <p className="text-sm text-muted-foreground text-center mt-2">
-              {quantityPickerItem && formatCurrency(quantityPickerItem.price)} each
-            </p>
-          </DialogContent>
-        </Dialog>
-
-        {/* Portion Picker Dialog (uneven splits of a shared item) */}
-        <Dialog open={showPortionPicker} onOpenChange={setShowPortionPicker}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>How much did you have?</DialogTitle>
-              <DialogDescription>
-                {portionPickerItem && (
-                  <>
-                    {portionPickerItem.name} — {formatCurrency(portionPickerItem.price)}.
-                    Everyone&apos;s portions are balanced against each other, so pick your true share.
-                  </>
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid grid-cols-3 gap-3 pt-4">
-              {[
-                { label: '¼', value: 0.25 },
-                { label: '⅓', value: 1 / 3 },
-                { label: '½', value: 0.5 },
-                { label: '⅔', value: 2 / 3 },
-                { label: '¾', value: 0.75 },
-                { label: 'All / equal', value: 1 },
-              ].map((portion) => (
-                <Button
-                  key={portion.label}
-                  variant="outline"
-                  className="h-16 text-lg font-semibold transition-smooth hover:scale-105 hover:bg-primary hover:text-primary-foreground rounded-xl"
-                  onClick={() => handlePortionClaim(Math.round(portion.value * 100) / 100)}
-                >
-                  {portion.label}
-                </Button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground text-center mt-2">
-              Example: you had ⅔ of the pasta, your friend had ⅓ — you each pick your share and
-              the split follows.
-            </p>
-          </DialogContent>
-        </Dialog>
+        {/* The split sheet — replaces the old quantity and portion pickers */}
+        <SplitSheet
+          open={showSplitSheet}
+          onOpenChange={(o) => {
+            setShowSplitSheet(o);
+            if (!o) setSplitItem(null);
+          }}
+          item={splitItem}
+          participants={participants}
+          claims={claims}
+          currentParticipantId={currentParticipant?.id ?? null}
+          isSubmitting={isSplitting}
+          onSubmit={handleSplitSubmit}
+        />
 
         {/* Edit Bill Dialog */}
         <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>

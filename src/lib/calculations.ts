@@ -135,6 +135,8 @@ export function formatQuantity(value: number): string {
   else if (Math.abs(frac - 2 / 3) < 0.05) glyph = '⅔';
   else if (Math.abs(frac - 0.25) < 0.05) glyph = '¼';
   else if (Math.abs(frac - 0.75) < 0.05) glyph = '¾';
+  else if (Math.abs(frac - 1 / 6) < 0.04) glyph = '⅙';
+  else if (Math.abs(frac - 5 / 6) < 0.04) glyph = '⅚';
   else if (frac > 0.01) return String(Math.round(value * 100) / 100);
   if (whole === 0) return glyph || '0';
   return `${whole}${glyph}`;

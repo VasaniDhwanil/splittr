@@ -125,6 +125,27 @@ check "removed participant is gone"  "" "$(curl -s $BASE/api/bills/$BILL | pytho
 check "remove host -> 400"           400 "$(curl -s -o /dev/null -w %{http_code} -X DELETE "$BASE/api/participants?participant_id=$CREATORP" -H "X-Creator-Token: $CTOKEN")"
 check "remove unknown -> 404"        404 "$(curl -s -o /dev/null -w %{http_code} -X DELETE "$BASE/api/participants?participant_id=00000000-0000-0000-0000-000000000000" -H "X-Creator-Token: $CTOKEN")"
 
+echo; echo "== batch split (the split sheet) =="
+post - $BASE/api/bills "$(json name='Batch split' creator_name=Splitter tax=0 tip_percent=0 items='[{"name":"dumplings","price":4,"quantity":2},{"name":"fish","price":42,"quantity":1}]')" > /dev/null
+SBILL=$(field id < "$WORK/last"); SCT=$(cat "$WORK/last" | field creator_token)
+curl -s "$BASE/api/bills/$SBILL" > $WORK/sbill
+SIT2=$(python3 -c "import json;d=json.load(open('$WORK/sbill'));print([i['id'] for i in d['items'] if i['quantity']==2][0])")
+SIT1=$(python3 -c "import json;d=json.load(open('$WORK/sbill'));print([i['id'] for i in d['items'] if i['quantity']==1][0])")
+SP1=$(python3 -c "import json;d=json.load(open('$WORK/sbill'));print(d['participants'][0]['id'])")
+SP2=$(post - $BASE/api/participants "$(json bill_id=$SBILL name=Maya)" > /dev/null; field id < $WORK/last)
+SP3=$(post - $BASE/api/participants "$(json bill_id=$SBILL name=Sam)" > /dev/null; field id < $WORK/last)
+# One sheet action = one request: three people split 2 dumplings as thirds
+check "batch 3-way split of 2 -> 200" 200 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT2 entries="[{\"participant_id\":\"$SP1\",\"share\":0.6667},{\"participant_id\":\"$SP2\",\"share\":0.6667},{\"participant_id\":\"$SP3\",\"share\":0.6667}]")")"
+check "all three claims landed"       3 "$(curl -s $BASE/api/bills/$SBILL | python3 -c "import json,sys;d=json.load(sys.stdin);print(len([c for c in d['claims'] if c['item_id']=='$SIT2']))")"
+check "batch over-claim -> 400"       400 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT2 entries="[{\"participant_id\":\"$SP2\",\"share\":2}]")")"
+# Re-splitting replaces the batch's own claims instead of stacking on them
+check "batch re-split replaces -> 200" 200 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT2 entries="[{\"participant_id\":\"$SP1\",\"share\":0.5},{\"participant_id\":\"$SP2\",\"share\":0.5},{\"participant_id\":\"$SP3\",\"share\":0.5}]")")"
+check "replaced share is 0.5"         "0.5" "$(curl -s $BASE/api/bills/$SBILL | python3 -c "import json,sys;d=json.load(sys.stdin);print([c['share'] for c in d['claims'] if c['item_id']=='$SIT2' and c['participant_id']=='$SP1'][0])")"
+check "foreign participant -> 400"    400 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT2 entries="[{\"participant_id\":\"00000000-0000-0000-0000-000000000000\",\"share\":0.5}]")")"
+check "batch split of single item"    200 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT1 entries="[{\"participant_id\":\"$SP1\",\"share\":0.5},{\"participant_id\":\"$SP2\",\"share\":0.5}]")")"
+check "empty entries -> 400"          400 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT1 entries='[]')")"
+curl -s -o /dev/null -X DELETE $BASE/api/bills/$SBILL -H "X-Creator-Token: $SCT"
+
 echo; echo "== custom dollar tip =="
 post - $BASE/api/bills "$(json name='Tip exact' creator_name=Tipper tax=0 tip_percent=18 tip_amount=7 items='[{"name":"x","price":20,"quantity":1}]')" > /dev/null
 TIPBILL=$(field id < "$WORK/last"); TIPCT=$(cat "$WORK/last" | field creator_token)
