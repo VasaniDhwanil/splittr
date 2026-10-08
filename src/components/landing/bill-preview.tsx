@@ -15,7 +15,7 @@ import { AvatarInitials, AvatarStack, getPersonHex } from '@/components/avatar-i
 import { formatCurrency } from '@/lib/calculations';
 
 const ME = 'Ines';
-const PEOPLE = ['Priya', 'Marcus', 'Ines', 'Tomás'];
+const PEOPLE = ['Rhythm', 'Marcus', 'Ines', 'Tomás'];
 const TAX = 4.35;
 const TIP = 9.8;
 
@@ -29,7 +29,7 @@ interface SampleItem {
 }
 
 const ITEMS: SampleItem[] = [
-  { id: 'birria', name: 'Birria tacos', quantity: 1, price: 18, claims: [['Priya'], ['Priya'], ['Priya']] },
+  { id: 'birria', name: 'Birria tacos', quantity: 1, price: 18, claims: [['Rhythm'], ['Rhythm'], ['Rhythm']] },
   { id: 'elote', name: 'Elote', quantity: 1, price: 7.5, claims: [['Marcus'], ['Marcus'], ['Marcus']] },
   { id: 'yuzu', name: 'Yuzu lemonade', quantity: 1, price: 6.5, claims: [[], [ME], [ME]] },
   { id: 'churros', name: 'Churros', quantity: 2, price: 6, claims: [['Tomás'], ['Tomás'], ['Tomás', ME]] },
@@ -171,7 +171,7 @@ export function BillPreview({ className }: BillPreviewProps) {
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="truncate text-lg font-semibold tracking-tight text-white">Friday tacos</p>
-          <p className="mt-0.5 text-sm text-white/40">Hosted by Priya · 4 people</p>
+          <p className="mt-0.5 text-sm text-white/40">Hosted by Rhythm · 4 people</p>
         </div>
         <AvatarStack names={PEOPLE} max={4} size="sm" className="shrink-0 pt-1" />
       </div>

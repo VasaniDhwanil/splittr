@@ -11,11 +11,11 @@ function SettlePreview() {
     <div
       className="rounded-2xl border border-white/10 bg-background/60 px-4 py-4"
       role="img"
-      aria-label="Example: you owe Priya $16.11, with Venmo, Cash App and PayPal buttons"
+      aria-label="Example: you owe Rhythm $16.11, with Venmo, Cash App and PayPal buttons"
     >
       <div className="flex items-center gap-3">
-        <AvatarInitials name="Priya" size="md" className="shrink-0 shadow-none" />
-        <p className="min-w-0 flex-1 truncate font-medium text-white">You owe Priya</p>
+        <AvatarInitials name="Rhythm" size="md" className="shrink-0 shadow-none" />
+        <p className="min-w-0 flex-1 truncate font-medium text-white">You owe Rhythm</p>
         <span className="font-money shrink-0 text-lg text-foreground">{formatCurrency(16.11)}</span>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 sm:pl-11">
