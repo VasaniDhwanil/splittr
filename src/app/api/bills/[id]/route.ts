@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { requireBillOwnership } from '@/lib/auth-helpers';
+import { requireBillOwnership, publicBill } from '@/lib/auth-helpers';
 import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
 import { parseZelleInput, ZELLE_INPUT_ERROR } from '@/lib/payment-links';
 import { signZelleQr } from '@/lib/zelle-server';
@@ -108,7 +108,7 @@ export async function GET(
     }
 
     return NextResponse.json({
-      ...bill,
+      ...publicBill(bill),
       ...handleFallback,
       ...(groupMembers ? { group_members: groupMembers } : {}),
       paid_by: paidBy,
@@ -318,7 +318,7 @@ export async function PATCH(
       );
     }
 
-    return NextResponse.json(updatedBill);
+    return NextResponse.json(publicBill(updatedBill));
   } catch (error) {
     console.error('Error updating bill:', error);
     return NextResponse.json(

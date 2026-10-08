@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SupabaseClient } from '@supabase/supabase-js';
+import { publicBill } from '@/lib/auth-helpers';
 
 async function requireGroupAccess(groupId: string, supabase: SupabaseClient) {
   const db = createAdminClient();
@@ -87,7 +88,7 @@ export async function GET(
     }
 
     const billsWithParticipants = (bills || []).map((bill) => ({
-      ...bill,
+      ...publicBill(bill),
       participants: participants.filter((p) => p.bill_id === bill.id),
     }));
 

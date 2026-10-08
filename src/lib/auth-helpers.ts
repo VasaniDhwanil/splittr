@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 import { SupabaseClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 /** Constant-time string comparison so token checks don't leak via timing. */
 function safeEqual(a: string, b: string): boolean {
@@ -16,12 +17,18 @@ export interface BillOwnershipResult {
   user?: { id: string };
 }
 
+/**
+ * Whoever holds the bill's creator token, or is its signed-in creator.
+ * `supabase` is the cookie client, used only to read the session; the token
+ * lookup goes through the service role because clients cannot read
+ * creator_token (migration 010).
+ */
 export async function requireBillOwnership(
   request: NextRequest,
   billId: string,
   supabase: SupabaseClient
 ): Promise<BillOwnershipResult> {
-  const { data: bill, error } = await supabase
+  const { data: bill, error } = await createAdminClient()
     .from('bills')
     .select('creator_token, creator_user_id')
     .eq('id', billId)
@@ -47,4 +54,11 @@ export async function requireBillOwnership(
   }
 
   return { authorized: false };
+}
+
+/** Strip server-only columns before a bill row goes into a response. */
+export function publicBill<T extends { creator_token?: unknown }>(bill: T): Omit<T, 'creator_token'> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { creator_token, ...rest } = bill;
+  return rest;
 }
