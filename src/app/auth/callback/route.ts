@@ -2,14 +2,7 @@ import { NextResponse } from 'next/server'
 import type { EmailOtpType } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { ensureProfile } from '@/lib/auth-profile'
-
-// Origins allowed to receive the auth handoff (prod + local dev). Keep this
-// in sync with the Supabase Auth "Redirect URLs" allowlist.
-const ALLOWED_ORIGINS = new Set([
-  'https://www.splittr.cash',
-  'https://splittr.cash',
-  'http://localhost:3000',
-])
+import { ALLOWED_ORIGINS } from '@/lib/site-origin'
 
 /** Only ever redirect to a same-site path — never to an arbitrary URL. */
 function safePath(raw: string | null | undefined): string {

@@ -3,18 +3,10 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
 import { buildGroupInviteEmail, sendEmail, isEmailConfigured } from '@/lib/email';
+import { siteOrigin } from '@/lib/site-origin';
 
 // Basic RFC-5322-ish email shape; the real check is Resend accepting it.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** Best-effort public origin for building the join link inside the email. */
-function originFrom(request: NextRequest): string {
-  const env = process.env.NEXT_PUBLIC_SITE_URL;
-  if (env) return env.replace(/\/$/, '');
-  const proto = request.headers.get('x-forwarded-proto') ?? 'https';
-  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host');
-  return host ? `${proto}://${host}` : new URL(request.url).origin;
-}
 
 // Email a group invite (with the join link) to someone.
 export async function POST(
@@ -83,7 +75,7 @@ export async function POST(
 
     const inviterName =
       myMembership.display_name || user.email?.split('@')[0] || 'A friend';
-    const joinUrl = `${originFrom(request)}/groups/join?code=${group.invite_code}`;
+    const joinUrl = `${siteOrigin(request)}/groups/join?code=${group.invite_code}`;
 
     const { subject, html, text } = buildGroupInviteEmail({
       groupName: group.name,
