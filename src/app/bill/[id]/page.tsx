@@ -4,60 +4,35 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import {
-  ArrowLeft,
-  Copy,
-  Share2,
-  Check,
-  X,
-  Users,
-  Loader2,
-  CheckCircle2,
-  RotateCcw,
-  Pencil,
-  Trash2,
-  Plus,
-  Wallet,
-  Divide,
-  ReceiptText,
-  SlidersHorizontal,
-  ExternalLink,
-  SearchX,
-  QrCode,
-} from 'lucide-react';
-import { formatCurrency, calculateSplits, billTotal, formatShare, formatQuantity } from '@/lib/calculations';
+import { ArrowLeft } from 'lucide-react';
+import { formatCurrency, calculateSplits, billTotal } from '@/lib/calculations';
 import { getPaymentOptions, billHasPaymentMethods, getZelleInfo } from '@/lib/payment-links';
-import { onPayLinkClick, ZellePanel } from '@/components/pay-links';
 import { Bill, BillItem, Participant, ItemClaim, ParticipantSplit, SplitMode, TipSplit } from '@/types';
 import { createClient } from '@/lib/supabase/client';
-import { AvatarInitials, AvatarStack, getPersonHex } from '@/components/avatar-initials';
 import { SplitSheet, SplitEntry } from '@/components/split-sheet';
 import { useBillRealtime } from '@/hooks/use-bill-realtime';
 import { ShareQrDialog } from '@/components/share-qr-dialog';
+import { Reveal } from '@/components/groups/reveal';
+import { Section } from '@/components/groups/section';
+import { ConfirmDialog } from '@/components/groups/group-dialog';
+import { SummaryRow } from '@/components/create/summary-row';
+import { BillHeader, HostPanel } from '@/components/bill/bill-header';
+import { ParticipantList } from '@/components/bill/participant-list';
+import { ItemRow } from '@/components/bill/item-row';
+import { PayShare } from '@/components/bill/pay-share';
+import { OwesList } from '@/components/bill/owes-list';
+import { BottomBar } from '@/components/bill/bottom-bar';
+import { BillSkeleton } from '@/components/bill/bill-skeleton';
+import { Note } from '@/components/bill/note';
+import { Confetti } from '@/components/bill/confetti';
+import { JoinDialog } from '@/components/bill/join-dialog';
+import { EditBillDialog, type EditableItem, type EditBillDraft } from '@/components/bill/edit-bill-dialog';
 
-interface EditableItem {
-  id?: string;
-  name: string;
-  price: number;
-  quantity: number;
-}
-
-const SPLIT_MODE_META: Record<SplitMode, { label: string; icon: typeof ReceiptText }> = {
-  items: { label: 'By item', icon: ReceiptText },
-  even: { label: 'Split evenly', icon: Divide },
-  custom: { label: 'Custom amounts', icon: SlidersHorizontal },
+const SPLIT_MODE_LABEL: Record<SplitMode, string> = {
+  items: 'By item',
+  even: 'Split evenly',
+  custom: 'Custom amounts',
 };
 
 export default function BillPage() {
@@ -75,7 +50,7 @@ export default function BillPage() {
   const [joinName, setJoinName] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
-  // Same name already on the bill (joined from another device?) — confirm
+  // Same name already on the bill (joined from another device?), confirm
   const [duplicateCandidate, setDuplicateCandidate] = useState<Participant | null>(null);
   // Creator removing a participant
   const [removeTarget, setRemoveTarget] = useState<Participant | null>(null);
@@ -89,7 +64,7 @@ export default function BillPage() {
   const [hasShownConfetti, setHasShownConfetti] = useState(false);
   const [prevAllClaimed, setPrevAllClaimed] = useState(false);
 
-  // The split sheet — the one surface for claiming and splitting items
+  // The split sheet: the one surface for claiming and splitting items
   const [splitItem, setSplitItem] = useState<BillItem | null>(null);
   const [showSplitSheet, setShowSplitSheet] = useState(false);
   const [isSplitting, setIsSplitting] = useState(false);
@@ -141,7 +116,7 @@ export default function BillPage() {
   }, [billId]);
 
   // Realtime events arrive in bursts (8 people tapping = many channel
-  // callbacks) — coalesce them into one refetch instead of one each.
+  // callbacks), so coalesce them into one refetch instead of one each.
   const fetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleFetch = useCallback(() => {
     if (fetchTimer.current) clearTimeout(fetchTimer.current);
@@ -224,7 +199,7 @@ export default function BillPage() {
     });
   }, [bill, participants, currentParticipant]);
 
-  // Join without the name prompt — the server derives the name from the
+  // Join without the name prompt; the server derives the name from the
   // caller's group membership or profile. Returns null when not signed in.
   const autoJoin = async (): Promise<Participant | null> => {
     if (!bill) return null;
@@ -279,7 +254,7 @@ export default function BillPage() {
     if (!joinName.trim() || !bill) return;
 
     // Same name already on the bill? Probably the same person on a second
-    // device — confirm before creating a duplicate.
+    // device, so confirm before creating a duplicate.
     if (!forceNew) {
       const existing = participants.find(
         (p) => p.name.trim().toLowerCase() === joinName.trim().toLowerCase()
@@ -348,7 +323,7 @@ export default function BillPage() {
         toast.error(data.error || 'Failed to remove');
         return;
       }
-      toast.success(`${removeTarget.name} removed — their items are up for grabs again`);
+      toast.success(`${removeTarget.name} removed. Their items are up for grabs again.`);
       setRemoveTarget(null);
       await fetchBill();
     } catch {
@@ -358,7 +333,7 @@ export default function BillPage() {
     }
   };
 
-  // Every item tap opens the split sheet — the one surface for solo claims,
+  // Every item tap opens the split sheet, the one surface for solo claims,
   // group splits, and custom portions alike.
   const handleItemTap = async (item: BillItem) => {
     if (splitMode !== 'items') return;
@@ -386,7 +361,7 @@ export default function BillPage() {
     );
     if (!existingClaim) return;
 
-    // Unclaim optimistically — restore on failure
+    // Unclaim optimistically, restore on failure
     setClaimingItemId(item.id);
     setClaims((prev) => prev.filter((c) => c.id !== existingClaim.id));
     try {
@@ -692,9 +667,9 @@ export default function BillPage() {
   if (isLoading) {
     return (
       <main className="min-h-dvh py-8">
-        <div className="container mx-auto px-4 max-w-2xl flex flex-col justify-center items-center min-h-[60vh]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">Loading your bill...</p>
+        <div className="container mx-auto max-w-2xl px-4">
+          <div className="mb-8 h-5 w-20 animate-pulse rounded-md bg-white/[0.05]" />
+          <BillSkeleton />
         </div>
       </main>
     );
@@ -703,21 +678,14 @@ export default function BillPage() {
   if (!bill) {
     return (
       <main className="min-h-dvh py-8">
-        <div className="container mx-auto px-4 max-w-2xl">
-          <Card className="shadow-lg">
-            <CardContent className="py-12 text-center">
-              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                <SearchX className="h-6 w-6 text-white/50" />
-              </div>
-              <h2 className="text-xl font-semibold mb-2">Bill Not Found</h2>
-              <p className="text-muted-foreground mb-6">
-                This bill doesn&apos;t exist or has been deleted.
-              </p>
-              <Link href="/">
-                <Button size="lg">Back to Home</Button>
-              </Link>
-            </CardContent>
-          </Card>
+        <div className="container mx-auto flex min-h-[60vh] max-w-sm flex-col items-center justify-center px-4 text-center">
+          <Reveal>
+            <h2 className="text-2xl font-semibold tracking-tight text-white">Bill not found</h2>
+            <p className="mt-2 text-sm text-white/40">This bill doesn&apos;t exist or has been deleted.</p>
+            <Button asChild className="mt-8" variant="secondary">
+              <Link href="/">Back to home</Link>
+            </Button>
+          </Reveal>
         </div>
       </main>
     );
@@ -725,7 +693,6 @@ export default function BillPage() {
 
   const myShare = splits.find((s) => s.participant.id === currentParticipant?.id);
   const grandTotal = billTotal(bill);
-  const ModeIcon = SPLIT_MODE_META[splitMode].icon;
 
   // Whoever fronted the money collects: paid_by when set, else the creator
   const payerParticipantId = bill.paid_by_user_id
@@ -752,702 +719,249 @@ export default function BillPage() {
   const assignedTotal = participants.reduce((sum, p) => sum + (p.custom_amount ?? 0), 0);
   const unassigned = grandTotal - assignedTotal;
 
+  const headerMeta = [
+    ...(creatorParticipant ? [`Hosted by ${creatorParticipant.name}`] : []),
+    `${participants.length} ${participants.length === 1 ? 'person' : 'people'}`,
+    ...(bill.paid_by ? [`Paid by ${bill.paid_by.name}`] : []),
+    ...(splitMode !== 'items' ? [SPLIT_MODE_LABEL[splitMode]] : []),
+  ];
+
+  const editDraft: EditBillDraft = {
+    name: editName,
+    items: editItems,
+    tax: editTax,
+    tipPercent: editTipPercent,
+    tipExact: editTipExact,
+    tipSplit: editTipSplit,
+    splitMode: editSplitMode,
+    venmo: editVenmo,
+    cashapp: editCashapp,
+    paypal: editPaypal,
+    zelle: editZelle,
+    paidBy: editPaidBy,
+  };
+  const patchEditDraft = (patch: Partial<EditBillDraft>) => {
+    if (patch.name !== undefined) setEditName(patch.name);
+    if (patch.items !== undefined) setEditItems(patch.items);
+    if (patch.tax !== undefined) setEditTax(patch.tax);
+    if (patch.tipPercent !== undefined) setEditTipPercent(patch.tipPercent);
+    if (patch.tipExact !== undefined) setEditTipExact(patch.tipExact);
+    if (patch.tipSplit !== undefined) setEditTipSplit(patch.tipSplit);
+    if (patch.splitMode !== undefined) setEditSplitMode(patch.splitMode);
+    if (patch.venmo !== undefined) setEditVenmo(patch.venmo);
+    if (patch.cashapp !== undefined) setEditCashapp(patch.cashapp);
+    if (patch.paypal !== undefined) setEditPaypal(patch.paypal);
+    if (patch.zelle !== undefined) setEditZelle(patch.zelle);
+    if (patch.paidBy !== undefined) setEditPaidBy(patch.paidBy);
+  };
+  const payerChoices =
+    bill.group_id && (bill.group_members?.length ?? 0) > 1
+      ? (bill.group_members ?? [])
+          .filter((m) => m.user_id !== bill.creator_user_id)
+          .map((m) => ({ id: m.user_id, name: m.display_name }))
+      : null;
+
+  let sectionIndex = 1;
+
   return (
     <main className="min-h-dvh py-8 pb-36">
       {/* Confetti overlay */}
-      {showConfetti && (
-        <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
-          {[...Array(50)].map((_, i) => (
-            <div
-              key={i}
-              className="absolute w-3 h-3 rounded-sm"
-              style={{
-                left: `${Math.random() * 100}%`,
-                backgroundColor: ['#4ade80', '#facc15', '#fb923c', '#f472b6', '#38bdf8'][
-                  Math.floor(Math.random() * 5)
-                ],
-                animation: `confetti-fall ${2 + Math.random() * 2}s linear forwards`,
-                animationDelay: `${Math.random() * 0.5}s`,
-              }}
-            />
-          ))}
-        </div>
-      )}
+      {showConfetti && <Confetti />}
 
-      <div className="container mx-auto px-4 max-w-2xl">
-        <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Home
+      <div className="container mx-auto max-w-2xl px-4">
+        <Link
+          href="/"
+          className="mb-8 inline-flex h-11 items-center gap-2 text-sm text-white/40 transition-colors hover:text-white"
+        >
+          <ArrowLeft className="size-4" />
+          Home
         </Link>
 
-        {/* Bill Header */}
-        <Card className="mb-6 shadow-sm">
-          <CardContent className="py-5">
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <h1 className="text-2xl font-bold">{bill.name}</h1>
-                  {bill.status === 'settled' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400">
-                      <CheckCircle2 className="h-3 w-3" />
-                      Settled
-                    </span>
-                  )}
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-white/5 text-white/50 border border-white/10">
-                    <ModeIcon className="h-3 w-3" />
-                    {SPLIT_MODE_META[splitMode].label}
-                  </span>
-                  {bill.paid_by && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-white/5 text-white/50 border border-white/10">
-                      <Wallet className="h-3 w-3" />
-                      Paid by {bill.paid_by.name}
-                    </span>
-                  )}
-                </div>
-                <p className="text-muted-foreground text-sm">
-                  Share code: <span className="font-mono font-semibold text-foreground">{bill.short_code}</span>
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {isCreator && (
-                  <Button variant="outline" size="icon" onClick={openEditDialog} className="transition-smooth hover:scale-105" title="Edit bill">
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                )}
-                <Button variant="outline" size="icon" onClick={handleCopyLink} className="transition-smooth hover:scale-105">
-                  {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
-                </Button>
-                <Button variant="outline" size="icon" onClick={handleShare} className="transition-smooth hover:scale-105">
-                  <Share2 className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setShowQr(true)}
-                  className="transition-smooth hover:scale-105"
-                  title="Show QR code"
-                  aria-label="Show QR code"
-                >
-                  <QrCode className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-
-            {/* Payment progress + settle button (creator only) */}
+        <div className="space-y-10">
+          <Reveal index={0} className="space-y-6">
+            <BillHeader
+              name={bill.name}
+              status={bill.status}
+              meta={headerMeta}
+              shortCode={bill.short_code}
+              copied={copied}
+              canEdit={isCreator}
+              onCopy={handleCopyLink}
+              onShare={handleShare}
+              onShowQr={() => setShowQr(true)}
+              onEdit={openEditDialog}
+            />
             {isCreator && (
-              <div className="mt-4 pt-4 border-t space-y-3">
-                {payers.length > 0 && (
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-muted-foreground">Payments collected</span>
-                      <span className="font-medium">{paidCount} of {payers.length} paid</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-                      <div
-                        className="h-full bg-green-500/70 transition-all duration-500"
-                        style={{ width: `${payers.length > 0 ? (paidCount / payers.length) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                <Button
-                  variant={bill.status === 'settled' ? 'outline' : 'default'}
-                  size="sm"
-                  onClick={handleToggleStatus}
-                  disabled={isUpdatingStatus}
-                  className="w-full transition-smooth"
-                >
-                  {isUpdatingStatus ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : bill.status === 'settled' ? (
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                  )}
-                  {isUpdatingStatus
-                    ? 'Updating...'
-                    : bill.status === 'settled'
-                    ? 'Reopen Bill'
-                    : 'Mark as Settled'}
-                </Button>
-              </div>
+              <HostPanel
+                status={bill.status}
+                paidCount={paidCount}
+                payerCount={payers.length}
+                isUpdating={isUpdatingStatus}
+                onToggleStatus={handleToggleStatus}
+              />
             )}
-          </CardContent>
-        </Card>
+          </Reveal>
 
-        {/* Participants */}
-        <Card className="mb-6 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex justify-between items-center">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Users className="h-5 w-5 text-primary" />
-                Who&apos;s splitting? ({participants.length})
-              </CardTitle>
-              {!currentParticipant && (
-                <Dialog open={showJoinDialog} onOpenChange={setShowJoinDialog}>
-                  <Button
-                    size="sm"
-                    className="transition-smooth hover:scale-105"
-                    onClick={async () => {
-                      // Signed-in users join under their known identity;
-                      // the name dialog is the anonymous fallback.
-                      const joined = await autoJoin();
-                      if (!joined) setShowJoinDialog(true);
-                    }}
-                  >
-                    Join the fun
-                  </Button>
-                  <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Join the Split</DialogTitle>
-                      <DialogDescription>
-                        Enter your name to start picking what you had!
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 pt-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="joinName">What&apos;s your name?</Label>
-                        <Input
-                          id="joinName"
-                          placeholder="e.g., Alex"
-                          value={joinName}
-                          onChange={(e) => {
-                            setJoinName(e.target.value);
-                            setDuplicateCandidate(null);
-                          }}
-                          onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-                          className="text-lg"
-                        />
-                      </div>
-                      {duplicateCandidate ? (
-                        <div className="space-y-3">
-                          <p className="text-sm text-muted-foreground">
-                            Someone named{' '}
-                            <span className="text-foreground font-medium">{duplicateCandidate.name}</span>{' '}
-                            is already on this bill — maybe you, from another device. Is that you?
-                          </p>
-                          <Button
-                            className="w-full"
-                            size="lg"
-                            onClick={() => adoptParticipant(duplicateCandidate)}
-                          >
-                            Yes, that&apos;s me
-                          </Button>
-                          <Button
-                            variant="outline"
-                            className="w-full"
-                            onClick={() => handleJoin(true)}
-                            disabled={isJoining}
-                          >
-                            {isJoining ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : null}
-                            No, I&apos;m a different {duplicateCandidate.name}
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button onClick={() => handleJoin()} className="w-full" size="lg" disabled={isJoining}>
-                          {isJoining ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Joining...
-                            </>
-                          ) : (
-                            "Let's go!"
-                          )}
-                        </Button>
-                      )}
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-3">
-              {participants.map((p) => {
-                const hex = getPersonHex(p.name);
-                const isMe = p.id === currentParticipant?.id;
-                return (
-                  <div
-                    key={p.id}
-                    className="flex items-center gap-2 px-3 py-2 rounded-full transition-smooth"
-                    style={{
-                      backgroundColor: `${hex}1f`,
-                      boxShadow: isMe ? `inset 0 0 0 2px ${hex}99` : undefined,
-                    }}
-                  >
-                    <AvatarInitials name={p.name} size="sm" />
-                    <span className="text-sm font-medium">
-                      {p.name}
-                      {p.is_creator && ' (host)'}
-                      {isMe && ' (you)'}
-                    </span>
-                    {!p.is_creator && p.payment_status === 'paid' && (
-                      <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
-                    )}
-                    {isCreator && !p.is_creator && (
-                      <button
-                        type="button"
-                        title={`Remove ${p.name}`}
-                        onClick={() => setRemoveTarget(p)}
-                        className="ml-0.5 -mr-1 rounded-full p-0.5 text-white/40 hover:text-red-400 hover:bg-white/10 transition-smooth"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+          <Section index={sectionIndex++} title="People" count={participants.length}>
+            <ParticipantList
+              people={participants.map((p) => ({
+                id: p.id,
+                name: p.name,
+                isYou: p.id === currentParticipant?.id,
+                isHost: p.is_creator,
+                isPaid: !p.is_creator && p.payment_status === 'paid',
+                canRemove: isCreator && !p.is_creator,
+              }))}
+              onRemove={(id) => setRemoveTarget(participants.find((p) => p.id === id) ?? null)}
+            />
+            {!currentParticipant && (
+              <Button
+                className="mt-4 w-full sm:w-auto"
+                onClick={async () => {
+                  // Signed-in users join under their known identity;
+                  // the name dialog is the anonymous fallback.
+                  const joined = await autoJoin();
+                  if (!joined) setShowJoinDialog(true);
+                }}
+              >
+                Join this bill
+              </Button>
+            )}
+          </Section>
 
-        {/* Items */}
-        <Card className="mb-6 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg">
-              {splitMode === 'items' ? 'What did you have?' : 'On the bill'}
-            </CardTitle>
-            <CardDescription>
-              {splitMode === 'items'
+          <Section
+            index={sectionIndex++}
+            title={splitMode === 'items' ? 'What did you have?' : 'On the bill'}
+            description={
+              splitMode === 'items'
                 ? currentParticipant
-                  ? 'Tap an item to claim it — or split it with anyone at the table.'
+                  ? 'Tap an item to claim it, or split it with anyone at the table.'
                   : 'Join the bill first, then tap your items.'
                 : splitMode === 'even'
-                ? `The total is split evenly between ${participants.length} ${participants.length === 1 ? 'person' : 'people'}.`
-                : 'The host assigns each person their amount below.'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {items.map((item) => {
-              const claimers = splitMode === 'items' ? getItemClaimers(item.id) : [];
-              const claimedByMe = splitMode === 'items' && isItemClaimedByMe(item.id);
-              const myClaimShare = getMyClaimShare(item.id);
-              const totalShares = claimers.reduce((sum, c) => sum + c.share, 0);
-              // Portions are absolute until the item is over-claimed (must
-              // match calculateSplits so the list and totals agree)
-              const shareDenominator = Math.max(totalShares, item.quantity);
-              const isAnimating = claimingItemId === item.id;
-
-              // Calculate my portion of the item
-              const myPortion = myClaimShare && shareDenominator > 0
-                ? (item.price * item.quantity * myClaimShare) / shareDenominator
-                : 0;
-
-              // Equal shares collapse to one line ("Split 3 ways — $2.67 each");
-              // per-person breakdowns are for uneven splits only
-              const equalSplit =
-                claimers.length > 1 &&
-                claimers.every((c) => Math.abs(c.share - claimers[0].share) < 0.005);
-              const equalPerHead = equalSplit
-                ? (item.price * item.quantity * claimers[0].share) / shareDenominator
-                : 0;
-
-              // Tint the item with its claimers' colors — shared items blend
-              // them; the highlight stays light so the blend reads through
-              const claimerHexes = claimers.map((c) => getPersonHex(c.participant.name));
-              const myHex = currentParticipant ? getPersonHex(currentParticipant.name) : null;
-              const itemStyle: React.CSSProperties = {};
-              if (claimerHexes.length === 1) {
-                itemStyle.backgroundColor = `${claimerHexes[0]}17`;
-                itemStyle.boxShadow = `inset 0 0 0 1.5px ${claimerHexes[0]}${claimedByMe ? '73' : '40'}`;
-              } else if (claimerHexes.length > 1) {
-                itemStyle.background = `linear-gradient(100deg, ${claimerHexes
-                  .map((hex, i) => `${hex}1f ${(i / (claimerHexes.length - 1)) * 100}%`)
-                  .join(', ')})`;
-                if (claimedByMe && myHex) {
-                  itemStyle.boxShadow = `inset 0 0 0 1.5px ${myHex}59`;
-                }
-              }
-
-              return (
-                <div
-                  key={item.id}
-                  className={`p-4 rounded-xl transition-smooth ${
-                    isAnimating ? 'animate-claim-pop' : ''
-                  } ${claimers.length === 0 ? 'bg-muted/50' : 'shadow-sm'} ${
-                    splitMode === 'items'
-                      ? 'cursor-pointer hover:brightness-125'
-                      : ''
-                  }`}
-                  style={itemStyle}
-                  onClick={() => handleItemTap(item)}
-                >
-                  <div className="flex justify-between items-start gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-base">
-                        {item.quantity > 1 && (
-                          <span className="text-muted-foreground">{item.quantity}× </span>
-                        )}
-                        {item.name}
-                      </div>
-                      {claimers.length > 0 && (
-                        <div className="flex flex-col gap-1 mt-2">
-                          <div className="flex items-center gap-2">
-                            <AvatarStack
-                              names={claimers.map((c) => c.participant.name)}
-                              max={4}
-                              size="sm"
-                            />
-                            {item.quantity > 1 && totalShares > 0 && (
-                              <span className="text-xs text-muted-foreground">
-                                {totalShares >= item.quantity - 0.01
-                                  ? 'fully claimed'
-                                  : `${formatQuantity(totalShares)}/${item.quantity} claimed`}
-                              </span>
-                            )}
-                          </div>
-                          {equalSplit ? (
-                            <div className="text-xs text-muted-foreground">
-                              Split {claimers.length} ways · {formatCurrency(equalPerHead)} each
-                            </div>
-                          ) : (
-                            <>
-                              {item.quantity > 1 && claimers.length > 0 && (
-                                <div className="text-xs text-muted-foreground">
-                                  {claimers.map((c, i) => (
-                                    <span key={c.participant.id}>
-                                      {c.participant.name}: {formatQuantity(c.share)}
-                                      {i < claimers.length - 1 && ', '}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                              {/* Uneven portions on a shared single item (e.g. ⅔ / ⅓ of a pasta) */}
-                              {item.quantity === 1 && totalShares > 0 &&
-                                (claimers.length > 1 || claimers.some((c) => c.share !== 1)) && (
-                                <div className="text-xs text-muted-foreground">
-                                  {claimers.map((c, i) => (
-                                    <span key={c.participant.id}>
-                                      {c.participant.name}: {formatShare(c.share / shareDenominator)}
-                                      {i < claimers.length - 1 && ' · '}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="font-semibold text-base">
-                        {formatCurrency(item.price * item.quantity)}
-                      </div>
-                      {claimedByMe && myClaimShare && (
-                        <>
-                          <div
-                            className={`flex items-center justify-end gap-1 mt-1 text-sm ${isAnimating ? 'animate-claim-check' : ''}`}
-                            style={{ color: myHex ?? undefined }}
-                          >
-                            <Check className="h-4 w-4" />
-                            <span>
-                              {item.quantity > 1
-                                ? `${formatQuantity(myClaimShare)}× = ${formatCurrency(myPortion)}`
-                                : claimers.length === 1 && myClaimShare === 1
-                                ? 'Yours'
-                                : `${formatShare(myClaimShare / shareDenominator)} · ${formatCurrency(myPortion)}`}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground transition-smooth mt-1 py-1.5 px-2 -mr-2 touch-manipulation"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleUnclaim(item);
-                            }}
-                          >
-                            unclaim
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                  ? `The total is split evenly between ${participants.length} ${participants.length === 1 ? 'person' : 'people'}.`
+                  : 'The host assigns each person their amount below.'
+            }
+          >
+            <div className="surface overflow-hidden rounded-2xl">
+              <div className="divide-y divide-white/[0.06]">
+                {items.map((item) => (
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    claimers={splitMode === 'items' ? getItemClaimers(item.id) : []}
+                    myShare={splitMode === 'items' && isItemClaimedByMe(item.id) ? getMyClaimShare(item.id) : null}
+                    interactive={splitMode === 'items'}
+                    pending={claimingItemId === item.id}
+                    onTap={() => handleItemTap(item)}
+                    onUnclaim={() => handleUnclaim(item)}
+                  />
+                ))}
+              </div>
+              <div className="space-y-1.5 border-t border-white/10 bg-white/[0.015] px-4 py-4">
+                <SummaryRow label="Subtotal">{formatCurrency(bill.subtotal)}</SummaryRow>
+                <SummaryRow label="Tax">{formatCurrency(bill.tax)}</SummaryRow>
+                <SummaryRow label={`Tip (${bill.tip_percent}%)`}>{formatCurrency(bill.tip_amount)}</SummaryRow>
+                <div className="pt-1.5">
+                  <SummaryRow label="Total" strong>
+                    {formatCurrency(grandTotal)}
+                  </SummaryRow>
                 </div>
-              );
-            })}
-
-            <Separator className="my-4" />
-
-            <div className="space-y-2 text-sm bg-muted/30 rounded-lg p-4">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span>{formatCurrency(bill.subtotal)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Tax</span>
-                <span>{formatCurrency(bill.tax)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Tip ({bill.tip_percent}%)</span>
-                <span>{formatCurrency(bill.tip_amount)}</span>
-              </div>
-              <Separator className="my-2" />
-              <div className="flex justify-between font-bold text-base">
-                <span>Total</span>
-                <span>{formatCurrency(grandTotal)}</span>
               </div>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* All items claimed celebration */}
-        {allItemsClaimed && (
-          <Card className="mb-6 shadow-sm bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20">
-            <CardContent className="py-6 text-center">
-              <CheckCircle2 className="h-8 w-8 text-primary mx-auto mb-2" />
-              <h3 className="font-semibold text-lg">All items claimed!</h3>
-              <p className="text-muted-foreground text-sm">Everyone&apos;s share is calculated below.</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Custom mode: unassigned warning for the host */}
-        {splitMode === 'custom' && isCreator && Math.abs(unassigned) > 0.01 && (
-          <Card className="mb-6 shadow-sm border-amber-500/20 bg-amber-500/5">
-            <CardContent className="py-4 text-sm text-amber-300/90">
-              {unassigned > 0
-                ? `${formatCurrency(unassigned)} of the bill is not assigned to anyone yet.`
-                : `Assigned amounts exceed the bill total by ${formatCurrency(-unassigned)}.`}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Pay your share */}
-        {currentParticipant && !currentParticipant.is_creator && myShare && (
-          <Card className="mb-6 shadow-sm border-primary/20">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Wallet className="h-5 w-5 text-primary" />
-                Settle up
-              </CardTitle>
-              <CardDescription>
-                {iAmPaid
-                  ? 'You are marked as paid. Thanks for settling up!'
-                  : payerDisplayName
-                  ? `You owe ${payerDisplayName} ${formatCurrency(myShare.total)}.`
-                  : `Your share is ${formatCurrency(myShare.total)}.`}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {!iAmPaid && (myPaymentOptions.length > 0 || myZelle) && (
-                <div className="grid gap-2">
-                  {myPaymentOptions.map((option) => (
-                    <a
-                      key={option.key}
-                      href={option.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={onPayLinkClick(option)}
-                      className="flex items-center justify-between px-4 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-smooth"
-                    >
-                      <span className="flex items-center gap-3">
-                        <span
-                          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                          style={{ backgroundColor: option.color }}
-                        >
-                          {option.label[0]}
-                        </span>
-                        <span>
-                          <span className="font-medium">{option.label}</span>
-                          <span className="text-muted-foreground text-sm ml-2">{option.handle}</span>
-                        </span>
-                      </span>
-                      <span className="flex items-center gap-2 text-sm font-semibold text-primary">
-                        {formatCurrency(myShare.total)}
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </span>
-                    </a>
-                  ))}
-                  {myZelle && <ZellePanel zelle={myZelle} amount={myShare.total} />}
-                </div>
-              )}
-              {!iAmPaid && myPaymentOptions.length === 0 && !myZelle && (
-                <p className="text-sm text-muted-foreground">
-                  Pay {payerDisplayName} however you usually do, then mark yourself paid.
-                </p>
-              )}
-              <Button
-                variant={iAmPaid ? 'outline' : 'default'}
-                className="w-full transition-smooth"
-                onClick={() => handleTogglePaid(currentParticipant)}
-                disabled={payingParticipantId === currentParticipant.id}
-              >
-                {payingParticipantId === currentParticipant.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : iAmPaid ? (
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
+            {(allItemsClaimed || (splitMode === 'custom' && isCreator && Math.abs(unassigned) > 0.01)) && (
+              <div className="mt-4 space-y-2">
+                {/* All items claimed: one quiet line (the confetti does the cheering) */}
+                {allItemsClaimed && <Note check>All items claimed. Everyone&apos;s share is below.</Note>}
+                {/* Custom mode: unassigned note for the host */}
+                {splitMode === 'custom' && isCreator && Math.abs(unassigned) > 0.01 && (
+                  <Note>
+                    {unassigned > 0
+                      ? `${formatCurrency(unassigned)} of the bill is not assigned to anyone yet.`
+                      : `Assigned amounts exceed the bill total by ${formatCurrency(-unassigned)}.`}
+                  </Note>
                 )}
-                {iAmPaid ? 'Undo — not paid yet' : "I've paid my share"}
-              </Button>
-            </CardContent>
-          </Card>
-        )}
+              </div>
+            )}
+          </Section>
 
-        {/* Split Summary */}
-        {splits.length > 0 && (
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg">Who owes what</CardTitle>
-              <CardDescription>
-                {splitMode === 'items'
+          {/* Pay your share */}
+          {currentParticipant && !currentParticipant.is_creator && myShare && (
+            <Section index={sectionIndex++} title="Settle up">
+              <PayShare
+                amount={myShare.total}
+                payerName={payerDisplayName}
+                isPaid={iAmPaid}
+                payOptions={myPaymentOptions}
+                zelle={myZelle}
+                isUpdating={payingParticipantId === currentParticipant.id}
+                onTogglePaid={() => handleTogglePaid(currentParticipant)}
+              />
+            </Section>
+          )}
+
+          {splits.length > 0 && (
+            <Section
+              index={sectionIndex++}
+              title="Who owes what"
+              description={
+                splitMode === 'items'
                   ? bill.tip_split === 'even'
                     ? 'Tax follows what each person ordered; the tip is split equally.'
                     : 'Tax and tip are split based on what each person ordered.'
                   : splitMode === 'even'
-                  ? 'Everyone pays the same share of the total.'
-                  : 'Amounts assigned by the host.'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {splits.map((split) => {
-                const p = split.participant;
-                const isPaid = !p.is_creator && p.payment_status === 'paid';
-                return (
-                  <div
-                    key={p.id}
-                    className={`p-4 rounded-xl transition-smooth ${
-                      p.id === currentParticipant?.id
-                        ? 'bg-primary/10 ring-2 ring-primary/30'
-                        : 'bg-muted/50'
-                    } ${isPaid ? 'opacity-80' : ''}`}
-                  >
-                    <div className="flex justify-between items-center mb-1">
-                      <div className="flex items-center gap-3">
-                        <AvatarInitials name={p.name} size="md" />
-                        <span className="font-medium">
-                          {p.name}
-                          {p.id === currentParticipant?.id && ' (you)'}
-                        </span>
-                        {isPaid && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400">
-                            <CheckCircle2 className="h-3 w-3" />
-                            Paid
-                          </span>
-                        )}
-                      </div>
-                      {splitMode === 'custom' && isCreator ? (
-                        <div className="flex items-center gap-1">
-                          <span className="text-muted-foreground text-sm">$</span>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            className="w-24 text-right font-semibold"
-                            value={customDrafts[p.id] ?? (p.custom_amount != null ? String(p.custom_amount) : '')}
-                            placeholder="0.00"
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) =>
-                              setCustomDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
-                            }
-                            onBlur={() => handleSaveCustomAmount(p)}
-                            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-                          />
-                        </div>
-                      ) : (
-                        <span className="text-2xl font-money" style={{ color: getPersonHex(p.name) }}>
-                          {formatCurrency(split.total)}
-                        </span>
-                      )}
-                    </div>
-                    {splitMode === 'items' && (
-                      <div className="text-sm text-muted-foreground space-y-1 pl-11 mt-2">
-                        <div className="flex justify-between">
-                          <span>{split.items.length} item{split.items.length !== 1 && 's'}</span>
-                          <span>{formatCurrency(split.itemsTotal)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>+ tax</span>
-                          <span>{formatCurrency(split.taxShare)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>+ tip</span>
-                          <span>{formatCurrency(split.tipShare)}</span>
-                        </div>
-                      </div>
-                    )}
-                    {/* Creator can toggle anyone's paid status */}
-                    {isCreator && !p.is_creator && (
-                      <div className="pl-11 mt-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-9 px-3 text-xs text-muted-foreground hover:text-foreground"
-                          disabled={payingParticipantId === p.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleTogglePaid(p);
-                          }}
-                        >
-                          {payingParticipantId === p.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                          ) : isPaid ? (
-                            <RotateCcw className="h-3 w-3 mr-1" />
-                          ) : (
-                            <CheckCircle2 className="h-3 w-3 mr-1" />
-                          )}
-                          {isPaid ? 'Mark unpaid' : 'Mark paid'}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Danger zone for creator */}
-        {isCreator && (
-          <div className="mt-6 text-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-destructive/70 hover:text-destructive hover:bg-destructive/10"
-              onClick={() => setShowDeleteDialog(true)}
+                    ? 'Everyone pays the same share of the total.'
+                    : 'Amounts assigned by the host.'
+              }
             >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete this bill
-            </Button>
-          </div>
-        )}
+              <OwesList
+                splits={splits}
+                splitMode={splitMode}
+                currentParticipantId={currentParticipant?.id ?? null}
+                isCreator={isCreator}
+                payingParticipantId={payingParticipantId}
+                customDrafts={customDrafts}
+                onCustomDraft={(id, value) => setCustomDrafts((prev) => ({ ...prev, [id]: value }))}
+                onCustomCommit={(id) => {
+                  const p = participants.find((x) => x.id === id);
+                  if (p) handleSaveCustomAmount(p);
+                }}
+                onTogglePaid={(id) => {
+                  const p = participants.find((x) => x.id === id);
+                  if (p) handleTogglePaid(p);
+                }}
+              />
+            </Section>
+          )}
+
+          {/* Danger zone for the host */}
+          {isCreator && (
+            <div className="border-t border-white/10 pt-6">
+              <Button
+                variant="ghost"
+                className="-ml-3 text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setShowDeleteDialog(true)}
+              >
+                Delete bill
+              </Button>
+            </div>
+          )}
+        </div>
 
         {/* Fixed bottom bar for current user */}
         {currentParticipant && myShare && (
-          <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t shadow-lg z-40">
-            <div className="container mx-auto max-w-2xl p-4">
-              <div className="flex justify-between items-center">
-                <div>
-                  <div className="text-sm text-muted-foreground">Your total</div>
-                  <div className="text-4xl font-money text-primary">{formatCurrency(myShare.total)}</div>
-                </div>
-                <div className="text-right">
-                  {splitMode === 'items' ? (
-                    <>
-                      <div className="text-sm text-muted-foreground">
-                        {myShare.items.length} item{myShare.items.length !== 1 && 's'}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        + {formatCurrency(myShare.taxShare + myShare.tipShare)} tax & tip
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">
-                      {splitMode === 'even' ? `Split ${participants.length} ways` : 'Assigned by host'}
-                    </div>
-                  )}
-                  {!currentParticipant.is_creator && iAmPaid && (
-                    <div className="text-sm text-green-400 flex items-center justify-end gap-1">
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Paid
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <BottomBar
+            total={myShare.total}
+            details={
+              splitMode === 'items'
+                ? [
+                    `${myShare.items.length} item${myShare.items.length !== 1 ? 's' : ''}`,
+                    `+ ${formatCurrency(myShare.taxShare + myShare.tipShare)} tax & tip`,
+                  ]
+                : [splitMode === 'even' ? `Split ${participants.length} ways` : 'Assigned by host']
+            }
+            isPaid={!currentParticipant.is_creator && iAmPaid}
+          />
         )}
 
         {/* Scan-to-join code for the table */}
@@ -1459,7 +973,7 @@ export default function BillPage() {
           shortCode={bill.short_code}
         />
 
-        {/* The split sheet — replaces the old quantity and portion pickers */}
+        {/* The split sheet: the one surface for claiming and splitting items */}
         <SplitSheet
           open={showSplitSheet}
           onOpenChange={(o) => {
@@ -1474,313 +988,53 @@ export default function BillPage() {
           onSubmit={handleSplitSubmit}
         />
 
-        {/* Edit Bill Dialog */}
-        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-          <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Edit Bill</DialogTitle>
-              <DialogDescription>
-                Update items, amounts, split mode, and payment details.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="editBillName">Bill name</Label>
-                <Input
-                  id="editBillName"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                />
-              </div>
+        {!currentParticipant && (
+          <JoinDialog
+            open={showJoinDialog}
+            onOpenChange={setShowJoinDialog}
+            name={joinName}
+            onNameChange={(name) => {
+              setJoinName(name);
+              setDuplicateCandidate(null);
+            }}
+            duplicateName={duplicateCandidate?.name ?? null}
+            isJoining={isJoining}
+            onJoin={() => handleJoin()}
+            onAdoptDuplicate={() => duplicateCandidate && adoptParticipant(duplicateCandidate)}
+            onJoinAsNew={() => handleJoin(true)}
+          />
+        )}
 
-              <div className="space-y-2">
-                <Label>Items</Label>
-                {editItems.map((item, index) => (
-                  <div key={item.id ?? `new-${index}`} className="flex gap-1 items-center">
-                    <Input
-                      placeholder="Item name"
-                      value={item.name}
-                      onChange={(e) => {
-                        const next = [...editItems];
-                        next[index] = { ...next[index], name: e.target.value };
-                        setEditItems(next);
-                      }}
-                      className="flex-1 text-sm"
-                    />
-                    <Input
-                      type="number"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(e) => {
-                        const next = [...editItems];
-                        next[index] = { ...next[index], quantity: parseInt(e.target.value) || 1 };
-                        setEditItems(next);
-                      }}
-                      className="w-14 text-center text-sm shrink-0"
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={item.price || ''}
-                      placeholder="0.00"
-                      onChange={(e) => {
-                        const next = [...editItems];
-                        next[index] = { ...next[index], price: parseFloat(e.target.value) || 0 };
-                        setEditItems(next);
-                      }}
-                      className="w-20 text-sm shrink-0"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0"
-                      onClick={() => setEditItems(editItems.filter((_, i) => i !== index))}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => setEditItems([...editItems, { name: '', price: 0, quantity: 1 }])}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add item
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  Removing an item also removes everyone&apos;s claims on it.
-                </p>
-              </div>
+        <EditBillDialog
+          open={showEditDialog}
+          onOpenChange={setShowEditDialog}
+          draft={editDraft}
+          onChange={patchEditDraft}
+          payerChoices={payerChoices}
+          creatorName={creatorParticipant?.name || 'Creator'}
+          isSaving={isSavingEdit}
+          onSave={handleSaveEdit}
+        />
 
-              <div className="flex gap-4">
-                <div className="space-y-2 flex-1">
-                  <Label htmlFor="editTax">Tax</Label>
-                  <Input
-                    id="editTax"
-                    type="number"
-                    step="0.01"
-                    value={editTax || ''}
-                    onChange={(e) => setEditTax(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-                <div className="space-y-2 flex-1">
-                  <Label htmlFor="editTip">Tip %</Label>
-                  <Input
-                    id="editTip"
-                    type="number"
-                    step="1"
-                    value={editTipPercent || ''}
-                    onChange={(e) => {
-                      setEditTipPercent(parseFloat(e.target.value) || 0);
-                      setEditTipExact('');
-                    }}
-                  />
-                </div>
-                <div className="space-y-2 flex-1">
-                  <Label htmlFor="editTipExact">Tip $ (exact)</Label>
-                  <Input
-                    id="editTipExact"
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.01"
-                    placeholder="overrides %"
-                    value={editTipExact}
-                    onChange={(e) => setEditTipExact(e.target.value)}
-                  />
-                </div>
-              </div>
+        <ConfirmDialog
+          open={showDeleteDialog}
+          onOpenChange={setShowDeleteDialog}
+          title="Delete this bill?"
+          description={`This permanently removes "${bill.name}" along with all items, participants, and claims. This cannot be undone.`}
+          confirmLabel={isDeleting ? 'Deleting...' : 'Delete bill'}
+          onConfirm={handleDeleteBill}
+          isPending={isDeleting}
+        />
 
-              {bill.group_id && (bill.group_members?.length ?? 0) > 1 && (
-                <div className="space-y-2">
-                  <Label>Who paid?</Label>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditPaidBy(null)}
-                      className={`px-3 py-1.5 rounded-full border text-sm transition-smooth ${
-                        editPaidBy === null
-                          ? 'border-primary/60 bg-primary/10'
-                          : 'border-white/10 bg-white/5 hover:bg-white/10'
-                      }`}
-                    >
-                      {creatorParticipant?.name || 'Creator'} (creator)
-                    </button>
-                    {(bill.group_members ?? [])
-                      .filter((m) => m.user_id !== bill.creator_user_id)
-                      .map((m) => (
-                        <button
-                          key={m.user_id}
-                          type="button"
-                          onClick={() => setEditPaidBy(m.user_id)}
-                          className={`px-3 py-1.5 rounded-full border text-sm transition-smooth ${
-                            editPaidBy === m.user_id
-                              ? 'border-primary/60 bg-primary/10'
-                              : 'border-white/10 bg-white/5 hover:bg-white/10'
-                          }`}
-                        >
-                          {m.display_name}
-                        </button>
-                      ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label>Tip split</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditTipSplit('proportional')}
-                    className={`p-2 rounded-full border text-sm transition-smooth ${
-                      editTipSplit === 'proportional'
-                        ? 'border-primary/60 bg-primary/10'
-                        : 'border-white/10 bg-white/5 hover:bg-white/10'
-                    }`}
-                  >
-                    Follows items
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditTipSplit('even')}
-                    className={`p-2 rounded-full border text-sm transition-smooth ${
-                      editTipSplit === 'even'
-                        ? 'border-primary/60 bg-primary/10'
-                        : 'border-white/10 bg-white/5 hover:bg-white/10'
-                    }`}
-                  >
-                    Split equally
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Split mode</Label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(Object.keys(SPLIT_MODE_META) as SplitMode[]).map((mode) => {
-                    const Icon = SPLIT_MODE_META[mode].icon;
-                    return (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setEditSplitMode(mode)}
-                        className={`p-2 rounded-lg border text-sm flex items-center justify-center gap-1.5 transition-smooth ${
-                          editSplitMode === mode
-                            ? 'border-primary/60 bg-primary/10'
-                            : 'border-white/10 bg-white/5 hover:bg-white/10'
-                        }`}
-                      >
-                        <Icon className="h-3.5 w-3.5" />
-                        {SPLIT_MODE_META[mode].label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <Label>Payment handles</Label>
-                <Input
-                  placeholder="Venmo — @your-venmo"
-                  value={editVenmo}
-                  onChange={(e) => setEditVenmo(e.target.value)}
-                />
-                <Input
-                  placeholder="Cash App — $yourcashtag"
-                  value={editCashapp}
-                  onChange={(e) => setEditCashapp(e.target.value)}
-                />
-                <Input
-                  placeholder="PayPal.Me — yourpaypalme"
-                  value={editPaypal}
-                  onChange={(e) => setEditPaypal(e.target.value)}
-                />
-                <Input
-                  placeholder="Zelle — email or US phone"
-                  value={editZelle}
-                  onChange={(e) => setEditZelle(e.target.value)}
-                />
-              </div>
-
-              <Button className="w-full" size="lg" onClick={handleSaveEdit} disabled={isSavingEdit}>
-                {isSavingEdit ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  'Save changes'
-                )}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Delete Bill Dialog */}
-        <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Delete this bill?</DialogTitle>
-              <DialogDescription>
-                This permanently removes {`"${bill.name}"`} along with all items, participants, and
-                claims. This cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex gap-3 pt-4">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setShowDeleteDialog(false)}
-                disabled={isDeleting}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                className="flex-1"
-                onClick={handleDeleteBill}
-                disabled={isDeleting}
-              >
-                {isDeleting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  'Delete bill'
-                )}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Remove participant dialog */}
-        <Dialog open={Boolean(removeTarget)} onOpenChange={(open) => !open && setRemoveTarget(null)}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Remove {removeTarget?.name}?</DialogTitle>
-              <DialogDescription>
-                Their claimed items go back up for grabs and their share is recalculated away.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex gap-3 pt-4">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setRemoveTarget(null)}
-                disabled={isRemoving}
-              >
-                Cancel
-              </Button>
-              <Button variant="destructive" className="flex-1" onClick={handleRemoveParticipant} disabled={isRemoving}>
-                {isRemoving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Remove
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <ConfirmDialog
+          open={Boolean(removeTarget)}
+          onOpenChange={(open) => !open && setRemoveTarget(null)}
+          title={`Remove ${removeTarget?.name ?? ''}?`}
+          description="Their claimed items go back up for grabs and their share is recalculated away."
+          confirmLabel="Remove"
+          onConfirm={handleRemoveParticipant}
+          isPending={isRemoving}
+        />
       </div>
     </main>
   );

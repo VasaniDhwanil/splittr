@@ -39,7 +39,19 @@ async function copy(text: string, message: string) {
   }
 }
 
-function CopyRow({ label, value, copyValue, message }: { label: string; value: string; copyValue: string; message: string }) {
+function CopyRow({
+  label,
+  value,
+  copyValue,
+  message,
+  money,
+}: {
+  label: string;
+  value: string;
+  copyValue: string;
+  message: string;
+  money?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -49,13 +61,13 @@ function CopyRow({ label, value, copyValue, message }: { label: string; value: s
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1500);
       }}
-      className="flex w-full items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2.5 text-left transition-smooth hover:bg-white/10"
+      className="flex min-h-14 w-full items-center justify-between gap-3 px-4 py-2.5 text-left outline-none transition-colors hover:bg-white/[0.04] focus-visible:bg-white/[0.04]"
     >
       <span className="min-w-0">
-        <span className="block text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
-        <span className="block truncate font-medium">{value}</span>
+        <span className="block text-[11px] font-medium uppercase tracking-wider text-white/40">{label}</span>
+        <span className={`block truncate text-white ${money ? 'font-money' : 'font-medium'}`}>{value}</span>
       </span>
-      {copied ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <Copy className="h-4 w-4 shrink-0 text-muted-foreground" />}
+      {copied ? <Check className="size-4 shrink-0 text-primary" /> : <Copy className="size-4 shrink-0 text-white/35" />}
     </button>
   );
 }
@@ -67,36 +79,28 @@ function CopyRow({ label, value, copyValue, message }: { label: string; value: s
 export function ZellePanel({ zelle, amount }: { zelle: ZelleInfo; amount: number }) {
   const [showQr, setShowQr] = useState(false);
   return (
-    <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-      <div className="flex items-center gap-3">
-        <span
-          className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white"
-          style={{ backgroundColor: ZELLE_COLOR }}
-        >
-          Z
-        </span>
-        <span className="flex-1">
-          <span className="font-medium">Zelle</span>
-          <span className="ml-2 text-sm text-muted-foreground">via your bank app</span>
-        </span>
+    <div className="divide-y divide-white/[0.06] overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+      <div className="flex min-h-12 items-center gap-2 px-4 py-1.5">
+        <span className="text-sm font-medium text-white">Zelle</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-white/40">via your bank app</span>
         {zelle.qrUrl && (
           <button
             type="button"
             onClick={() => setShowQr((v) => !v)}
-            className="inline-flex items-center gap-1 text-sm font-medium text-primary"
+            className="-mr-2 inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-white/60 outline-none transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-ring/50"
             aria-expanded={showQr}
           >
-            <QrCode className="h-4 w-4" />
+            <QrCode className="size-3.5" />
             {showQr ? 'Hide QR' : 'Show QR'}
           </button>
         )}
       </div>
 
       {zelle.qrUrl && showQr && (
-        <div className="flex flex-col items-center gap-2 py-2">
+        <div className="flex flex-col items-center gap-2 px-4 py-4">
           {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL */}
           <img src={zelle.qrUrl} alt="Zelle QR code" className="w-56 max-w-full rounded-xl bg-white object-contain p-2" />
-          <p className="text-center text-xs text-muted-foreground">
+          <p className="text-center text-xs text-white/40">
             Scan from Zelle in your bank app. Enter the amount yourself.
           </p>
         </div>
@@ -115,6 +119,7 @@ export function ZellePanel({ zelle, amount }: { zelle: ZelleInfo; amount: number
         value={formatCurrency(amount)}
         copyValue={Math.max(0, amount).toFixed(2)}
         message="Amount copied"
+        money
       />
     </div>
   );

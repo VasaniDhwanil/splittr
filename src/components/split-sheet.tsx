@@ -2,14 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { ChevronRight, Loader2, Minus, Plus } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { AvatarInitials } from '@/components/avatar-initials';
 import { formatCurrency, formatQuantity } from '@/lib/calculations';
 import { BillItem, ItemClaim, Participant } from '@/types';
@@ -35,7 +30,7 @@ interface SplitSheetProps {
 const CUSTOM_LADDER = [2, 3, 4, 6, 8, 9, 12, 15, 16, 18, 21, 24];
 const SINGLE_LADDER = [3, 4, 6, 8, 9, 12]; // ¼ ⅓ ½ ⅔ ¾ all
 
-/** Glyph for a share when it renders cleanly (⅔, 1½ …), else null — money leads. */
+/** Glyph for a share when it renders cleanly (⅔, 1½ …), else null; money leads. */
 function cleanGlyph(value: number): string | null {
   const g = formatQuantity(value);
   return /[½⅓⅔¼¾⅙⅚]/.test(g) || /^\d+$/.test(g) ? g : null;
@@ -55,7 +50,7 @@ export function SplitSheet({
 }: SplitSheetProps) {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [unitsHalf, setUnitsHalf] = useState(0); // group units in half-steps
-  // Until the stepper is touched, units track the full available pool — so
+  // Until the stepper is touched, units track the full available pool, so
   // selecting existing claimers grows the split to cover their shares too.
   const [unitsTouched, setUnitsTouched] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
@@ -75,7 +70,7 @@ export function SplitSheet({
   const multi = qty > 1;
 
   // Units available to a group split: the bill's quantity minus claims held
-  // by people NOT in the split — selecting an existing claimer folds their
+  // by people NOT in the split; selecting an existing claimer folds their
   // share back into the pool (their claim gets replaced by the new split).
   const selectedIds = participants.filter((p) => selected[p.id]).map((p) => p.id);
   const n = selectedIds.length;
@@ -133,7 +128,7 @@ export function SplitSheet({
   const customShare = effCustomTw / 12;
   const customIdx = customLadder.indexOf(effCustomTw);
 
-  // What's already gone, independent of selection — for the header line
+  // What's already gone, independent of selection, for the header line
   const totalClaimed = itemClaims.reduce((sum, c) => sum + c.share, 0);
   const remainingNow = Math.max(0, qty - totalClaimed);
 
@@ -187,20 +182,20 @@ export function SplitSheet({
   if (customOpen) {
     const g = formatQuantity(customShare);
     ctaLabel = customBlocked ? 'Nothing left to claim' : `Claim ${g} for yourself`;
-    previewLabel = 'Just you';
-    previewMoney = customBlocked ? '—' : formatCurrency(customMoney);
+    previewLabel = 'You pay';
+    previewMoney = formatCurrency(customBlocked ? 0 : customMoney);
   } else if (n === 0) {
     ctaLabel = 'Pick at least one person';
     previewLabel = 'Nobody selected';
-    previewMoney = '—';
+    previewMoney = formatCurrency(0);
   } else if (groupBlocked) {
     ctaLabel = 'All claimed already';
     previewLabel = 'Select claimers to re-split';
-    previewMoney = '—';
+    previewMoney = formatCurrency(0);
   } else if (n === 1) {
     const what = multi ? formatQuantity(units) : 'it';
     ctaLabel = soloIsMe ? `Claim ${what} for yourself` : `Claim ${what} for ${soloTarget?.name}`;
-    previewLabel = soloIsMe ? 'Just you' : `${soloTarget?.name} only`;
+    previewLabel = soloIsMe ? 'You pay' : `${soloTarget?.name} pays`;
     previewMoney = formatCurrency(eachMoney);
   } else {
     ctaLabel = `Split between ${n} people`;
@@ -220,7 +215,7 @@ export function SplitSheet({
       onSubmit(
         item,
         [{ participant_id: currentParticipantId, share: round4(customShare) }],
-        `Claimed ${formatQuantity(customShare)} of ${item.name} — ${formatCurrency(customMoney)}`
+        `Claimed ${formatQuantity(customShare)} of ${item.name}. ${formatCurrency(customMoney)}`
       );
       return;
     }
@@ -229,216 +224,224 @@ export function SplitSheet({
     const message =
       n === 1
         ? soloIsMe
-          ? `Claimed ${multi ? formatQuantity(units) : ''} ${item.name} — ${formatCurrency(eachMoney)}`.replace('  ', ' ')
-          : `Claimed ${item.name} for ${soloTarget?.name} — ${formatCurrency(eachMoney)}`
-        : `Split ${item.name} ${n} ways — ${formatCurrency(eachMoney)} each`;
+          ? `Claimed ${multi ? formatQuantity(units) : ''} ${item.name}. ${formatCurrency(eachMoney)}`.replace('  ', ' ')
+          : `Claimed ${item.name} for ${soloTarget?.name}. ${formatCurrency(eachMoney)}`
+        : `Split ${item.name} ${n} ways. ${formatCurrency(eachMoney)} each`;
     onSubmit(item, entries, message);
   };
 
+  const stepButton =
+    'flex size-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] outline-none transition-[background-color,color,scale] duration-150 touch-manipulation hover:bg-white/[0.08] hover:text-white active:scale-95 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-30';
+  const quietButton =
+    'inline-flex min-h-9 items-center rounded-full px-3 text-xs font-medium text-white/50 outline-none transition-colors touch-manipulation hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-ring/50';
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            {qty > 1 && <span className="text-muted-foreground font-normal">{qty}× </span>}
-            {item.name}
-          </DialogTitle>
-          <DialogDescription>
-            {formatCurrency(itemTotal)}
-            {multi &&
-              (totalClaimed <= 0.01
-                ? ' — nothing claimed yet'
-                : remainingNow <= 0.01
-                ? ` — all ${qty} claimed`
-                : ` — ${formatQuantity(remainingNow)} of ${qty} left`)}
-            {!multi && itemClaims.length > 0 && ` — shared by ${itemClaims.length} so far`}
-          </DialogDescription>
-        </DialogHeader>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        className="mx-auto max-h-[90dvh] w-full max-w-md gap-0 overflow-y-auto rounded-t-3xl border-x-0 border-t border-white/10 bg-[#0f0f12] p-0 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_-24px_64px_-24px_rgba(0,0,0,0.7)] sm:border-x [&>button]:top-5 [&>button]:right-4 [&>button]:flex [&>button]:size-9 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-full [&>button]:text-white/50 [&>button]:ring-offset-0 [&>button:hover]:bg-white/[0.06]"
+      >
+        <div className="px-5 pt-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+          <div className="mx-auto h-1 w-9 rounded-full bg-white/15" aria-hidden />
 
-        {/* Split-together zone */}
-        <div className={customOpen ? 'opacity-40 pointer-events-none transition-smooth' : 'transition-smooth'}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Who&apos;s sharing this?
-            </span>
-            <span className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={() => setSelected(Object.fromEntries(participants.map((p) => [p.id, true])))}
-                className="px-2.5 py-1 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-xs transition-smooth"
-              >
-                Everyone
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelected(currentParticipantId ? { [currentParticipantId]: true } : {})}
-                className="px-2.5 py-1 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-xs transition-smooth"
-              >
-                Just me
-              </button>
-            </span>
+          {/* Item and line price */}
+          <div className="mt-4 pr-10">
+            <SheetTitle className="text-xl font-semibold tracking-tight text-white">
+              {qty > 1 && <span className="font-normal text-white/40">{qty}× </span>}
+              {item.name}
+            </SheetTitle>
+            <SheetDescription className="mt-1 text-sm text-white/40">
+              <span className="font-money text-white/80">{formatCurrency(itemTotal)}</span>
+              {multi &&
+                (totalClaimed <= 0.01
+                  ? ' · nothing claimed yet'
+                  : remainingNow <= 0.01
+                    ? ` · all ${qty} claimed`
+                    : ` · ${formatQuantity(remainingNow)} of ${qty} left`)}
+              {!multi && itemClaims.length > 0 && ` · shared by ${itemClaims.length} so far`}
+            </SheetDescription>
           </div>
 
-          <div className="flex flex-wrap gap-1">
-            {participants.map((p) => {
-              const on = Boolean(selected[p.id]);
-              const isMe = p.id === currentParticipantId;
-              const existing = claimByPid[p.id];
-              return (
+          {/* Split-together zone */}
+          <div
+            className={cn(
+              'mt-6 transition-opacity duration-200',
+              customOpen && 'pointer-events-none opacity-40'
+            )}
+          >
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-white/70">Who&apos;s sharing this?</span>
+              <span className="-mr-3 flex shrink-0">
                 <button
-                  key={p.id}
                   type="button"
-                  onClick={() => setSelected((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
-                  className={`flex flex-col items-center gap-1 w-16 py-1.5 rounded-lg transition-smooth hover:bg-white/5 ${
-                    on ? '' : 'opacity-35'
-                  }`}
+                  onClick={() => setSelected(Object.fromEntries(participants.map((p) => [p.id, true])))}
+                  className={quietButton}
                 >
-                  <AvatarInitials
-                    name={p.name}
-                    size="lg"
-                    className={on ? 'ring-2 ring-white/80' : ''}
-                  />
-                  <span className="text-[10px] leading-tight text-muted-foreground max-w-full truncate px-0.5">
-                    {isMe ? 'You' : p.name}
-                  </span>
-                  {multi && existing !== undefined && (
-                    <span className="text-[9px] leading-none text-primary -mt-0.5">
-                      has {formatQuantity(existing)}
-                    </span>
-                  )}
+                  Everyone
                 </button>
-              );
-            })}
-          </div>
-
-          {/* Units stepper — only meaningful on multi-quantity items */}
-          {multi && !takeRest && !groupBlocked && (
-            <div className="mt-3">
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">
-                How many of the {qty} are you splitting?
-              </div>
-              <div className="flex items-center justify-center gap-5 pt-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="rounded-full h-11 w-11"
-                  onClick={() => {
-                    setUnitsTouched(true);
-                    setUnitsHalf(Math.max(1, effUnitsHalf - 1));
-                  }}
-                  disabled={effUnitsHalf <= 1}
-                  aria-label="Fewer units"
+                <button
+                  type="button"
+                  onClick={() => setSelected(currentParticipantId ? { [currentParticipantId]: true } : {})}
+                  className={quietButton}
                 >
-                  <Minus className="h-4 w-4" />
-                </Button>
-                <div className="text-center min-w-20">
-                  <div className="text-3xl font-bold leading-tight">{unitsGlyph}</div>
-                  <div className="text-xs text-muted-foreground">
-                    unit{units === 1 ? '' : 's'}
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="rounded-full h-11 w-11"
-                  onClick={() => {
-                    setUnitsTouched(true);
-                    setUnitsHalf(Math.min(maxHalf, effUnitsHalf + 1));
-                  }}
-                  disabled={effUnitsHalf >= maxHalf}
-                  aria-label="More units"
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
+                  Just me
+                </button>
+              </span>
             </div>
-          )}
-          {takeRest && (
-            <p className="mt-3 text-center text-xs text-muted-foreground">
-              Only {formatQuantity(pool)} left — splitting that.
-            </p>
-          )}
-          {!customOpen && replacedNames.length > 0 && (
-            <p className="mt-2 text-center text-[11px] text-muted-foreground">
-              This replaces {replacedNames.join(' and ')} current share
-              {replacedNames.length > 1 ? 's' : ''} on this item.
-            </p>
-          )}
-        </div>
 
-        {/* Custom solo claim */}
-        <button
-          type="button"
-          onClick={() => setCustomOpen((v) => !v)}
-          className="w-full border-t border-white/10 pt-3 text-left text-sm text-muted-foreground hover:text-foreground transition-smooth flex items-center justify-between"
-        >
-          <span>
-            Had your own odd amount? <span className="text-primary font-medium">Custom</span>
-          </span>
-          <ChevronRight
-            className={`h-4 w-4 transition-transform ${customOpen ? 'rotate-90' : ''}`}
-          />
-        </button>
-        {customOpen && (
-          <div>
-            {customBlocked ? (
-              <p className="text-center text-sm text-muted-foreground py-2">
-                Nothing left to claim — everything is spoken for.
-              </p>
-            ) : (
-              <div className="flex items-center justify-center gap-5">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="rounded-full h-11 w-11"
-                  onClick={() => customIdx > 0 && setCustomTw(customLadder[customIdx - 1])}
-                  disabled={customIdx <= 0}
-                  aria-label="Smaller share"
-                >
-                  <Minus className="h-4 w-4" />
-                </Button>
-                <div className="text-center min-w-20">
-                  <div className="text-3xl font-bold leading-tight">
-                    {formatQuantity(customShare)}
+            <div className="flex flex-wrap gap-2">
+              {participants.map((p) => {
+                const on = Boolean(selected[p.id]);
+                const isMe = p.id === currentParticipantId;
+                const existing = claimByPid[p.id];
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setSelected((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
+                    className={cn(
+                      'inline-flex min-h-11 max-w-full items-center gap-2 rounded-full border py-1 pr-4 pl-1.5 text-sm outline-none transition-[background-color,border-color,color,scale] duration-200 touch-manipulation active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-ring/50',
+                      on
+                        ? 'border-primary/60 bg-primary/15 font-medium text-white'
+                        : 'border-white/10 bg-white/[0.02] text-white/60 hover:border-white/15 hover:bg-white/[0.05] hover:text-white'
+                    )}
+                  >
+                    <AvatarInitials
+                      name={p.name}
+                      size="md"
+                      className={cn('shrink-0 shadow-none', !on && 'opacity-50')}
+                    />
+                    <span className="min-w-0 truncate">{isMe ? 'You' : p.name}</span>
+                    {multi && existing !== undefined && (
+                      <span className="shrink-0 text-xs font-normal text-white/40">
+                        has {formatQuantity(existing)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Units stepper: only meaningful on multi-quantity items */}
+            {multi && !takeRest && !groupBlocked && (
+              <div className="mt-6">
+                <div className="text-center text-sm text-white/50">How many of the {qty} are you splitting?</div>
+                <div className="flex items-center justify-center gap-6 pt-3">
+                  <button
+                    type="button"
+                    className={stepButton}
+                    onClick={() => {
+                      setUnitsTouched(true);
+                      setUnitsHalf(Math.max(1, effUnitsHalf - 1));
+                    }}
+                    disabled={effUnitsHalf <= 1}
+                    aria-label="Fewer units"
+                  >
+                    <Minus className="size-4" />
+                  </button>
+                  <div className="min-w-20 text-center">
+                    <div className="font-money text-5xl leading-none text-white">{unitsGlyph}</div>
+                    <div className="mt-1.5 text-xs text-white/40">unit{units === 1 ? '' : 's'}</div>
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {customShare <= 1 ? 'of one' : 'units'}
-                  </div>
+                  <button
+                    type="button"
+                    className={stepButton}
+                    onClick={() => {
+                      setUnitsTouched(true);
+                      setUnitsHalf(Math.min(maxHalf, effUnitsHalf + 1));
+                    }}
+                    disabled={effUnitsHalf >= maxHalf}
+                    aria-label="More units"
+                  >
+                    <Plus className="size-4" />
+                  </button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="rounded-full h-11 w-11"
-                  onClick={() =>
-                    customIdx < customLadder.length - 1 && setCustomTw(customLadder[customIdx + 1])
-                  }
-                  disabled={customIdx >= customLadder.length - 1}
-                  aria-label="Bigger share"
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
               </div>
             )}
+            {takeRest && (
+              <p className="mt-4 text-center text-sm text-white/50">
+                Only {formatQuantity(pool)} left, so you&apos;re splitting that.
+              </p>
+            )}
+            {!customOpen && replacedNames.length > 0 && (
+              <p className="mt-4 text-center text-xs text-white/40">
+                This replaces {replacedNames.join(' and ')} current share
+                {replacedNames.length > 1 ? 's' : ''} on this item.
+              </p>
+            )}
           </div>
-        )}
 
-        {/* Preview + CTA */}
-        <div className="border-t border-white/10 pt-3">
-          <div className="flex justify-between items-baseline gap-3">
-            <span className="text-sm text-muted-foreground">{previewLabel}</span>
-            <span className="text-xl font-bold text-primary font-money whitespace-nowrap">
-              {previewMoney}
+          {/* Custom solo claim */}
+          <button
+            type="button"
+            onClick={() => setCustomOpen((v) => !v)}
+            aria-expanded={customOpen}
+            className="mt-6 flex min-h-12 w-full items-center justify-between gap-3 border-t border-white/10 pt-1 text-left text-sm text-white/50 outline-none transition-colors hover:text-white focus-visible:text-white"
+          >
+            <span>
+              Had your own odd amount? <span className="font-medium text-primary">Custom</span>
             </span>
-          </div>
-          {previewNote && (
-            <div className="text-right text-xs text-muted-foreground mt-0.5">{previewNote}</div>
+            <ChevronRight
+              className={cn('size-4 shrink-0 transition-transform duration-200', customOpen && 'rotate-90')}
+            />
+          </button>
+          {customOpen &&
+            (customBlocked ? (
+              <p className="py-2 text-center text-sm text-white/50">
+                Nothing left to claim. Everything is spoken for.
+              </p>
+            ) : (
+              <div
+                role="radiogroup"
+                aria-label="Your share"
+                className={cn(
+                  'mt-1 flex flex-wrap bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]',
+                  customLadder.length > 6 ? 'rounded-3xl' : 'rounded-full'
+                )}
+              >
+                {customLadder.map((tw) => {
+                  const on = tw === effCustomTw;
+                  return (
+                    <button
+                      key={tw}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => setCustomTw(tw)}
+                      className={cn(
+                        'font-money min-h-11 basis-1/6 rounded-full text-base outline-none transition-[background-color,color,scale] duration-200 touch-manipulation active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-ring/50',
+                        on
+                          ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
+                          : 'text-white/60 hover:bg-white/[0.05] hover:text-white'
+                      )}
+                    >
+                      {formatQuantity(tw / 12)}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          {customOpen && !customBlocked && customIdx >= 0 && (
+            <p className="mt-2 text-center text-xs text-white/40">
+              {customShare <= 1 ? 'of one' : 'units'}
+            </p>
           )}
-          <Button className="w-full mt-3" size="lg" onClick={handleSubmit} disabled={ctaDisabled}>
-            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            {ctaLabel}
-          </Button>
+
+          {/* Preview + CTA */}
+          <div className="mt-5 border-t border-white/10 pt-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="min-w-0 truncate text-sm text-white/60">{previewLabel}</span>
+              <span className="font-money shrink-0 whitespace-nowrap text-2xl text-primary">{previewMoney}</span>
+            </div>
+            {previewNote && <div className="mt-0.5 text-right text-xs text-white/40">{previewNote}</div>}
+            <Button className="mt-4 w-full" size="lg" onClick={handleSubmit} disabled={ctaDisabled}>
+              {isSubmitting && <Loader2 className="animate-spin" />}
+              {ctaLabel}
+            </Button>
+          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }
