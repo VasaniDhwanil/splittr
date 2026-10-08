@@ -27,9 +27,15 @@ export function Hero() {
           initial={reduceMotion ? false : 'hidden'}
           animate="show"
         >
+          <motion.p
+            variants={item}
+            className="mb-4 inline-block bg-gradient-to-r from-emerald-300 via-green-400 to-lime-300 bg-clip-text pb-1 text-2xl font-semibold tracking-tight text-transparent md:text-3xl"
+          >
+            Splittr
+          </motion.p>
           <motion.h1
             variants={item}
-            className="text-4xl font-semibold leading-[1.05] tracking-tight text-balance text-white md:text-5xl lg:text-6xl"
+            className="text-4xl font-semibold leading-[1.05] tracking-[-0.02em] text-balance text-white md:text-5xl lg:text-6xl"
           >
             Pay for what you ordered.
           </motion.h1>
@@ -52,11 +58,19 @@ export function Hero() {
         </motion.div>
 
         <motion.div
-          className="lg:col-span-7 lg:pl-6"
+          className="relative isolate lg:col-span-7 lg:pl-6"
           initial={reduceMotion ? false : { opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: 'easeOut', delay: 0.18 }}
         >
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -inset-x-16 -top-10 -bottom-10 -z-10 rounded-full blur-3xl"
+            style={{
+              background:
+                'radial-gradient(ellipse at center, rgba(74, 222, 128, 0.22), rgba(74, 222, 128, 0.08) 35%, transparent 60%)',
+            }}
+          />
           <BillPreview className="mx-auto max-w-lg lg:mr-0" />
         </motion.div>
       </div>

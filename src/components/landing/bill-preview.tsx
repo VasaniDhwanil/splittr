@@ -1,7 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { motion, useInView, useReducedMotion } from 'framer-motion';
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import {
+  AnimatePresence,
+  animate,
+  motion,
+  useInView,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+} from 'framer-motion';
 import { Check } from 'lucide-react';
 import { AvatarInitials, AvatarStack, getPersonHex } from '@/components/avatar-initials';
 import { formatCurrency } from '@/lib/calculations';
@@ -49,6 +57,10 @@ function shareFor(phase: Phase): number {
   return mine + TAX * ratio + TIP * ratio;
 }
 
+/**
+ * Base tint for a row. Multi-claimer gradients cannot transition, so they live on
+ * an overlay (see rowGradient) that fades in and out over this base.
+ */
 function rowStyle(claimers: string[]): CSSProperties {
   const hexes = claimers.map(getPersonHex);
   const mine = claimers.includes(ME);
@@ -60,13 +72,21 @@ function rowStyle(claimers: string[]): CSSProperties {
   }
   if (hexes.length > 1) {
     return {
-      background: `linear-gradient(100deg, ${hexes
-        .map((hex, i) => `${hex}1f ${(i / (hexes.length - 1)) * 100}%`)
-        .join(', ')})`,
-      boxShadow: mine ? `inset 0 0 0 1.5px ${getPersonHex(ME)}59` : undefined,
+      backgroundColor: `${hexes[0]}00`,
+      boxShadow: mine ? `inset 0 0 0 1.5px ${getPersonHex(ME)}59` : `inset 0 0 0 1.5px ${hexes[0]}00`,
     };
   }
   return {};
+}
+
+/** The gradient for the item's fullest claim set, or null if it never has more than one claimer. */
+function rowGradient(item: SampleItem): string | null {
+  const widest = item.claims.reduce((a, b) => (b.length > a.length ? b : a));
+  if (widest.length < 2) return null;
+  const hexes = widest.map(getPersonHex);
+  return `linear-gradient(100deg, ${hexes
+    .map((hex, i) => `${hex}1f ${(i / (hexes.length - 1)) * 100}%`)
+    .join(', ')})`;
 }
 
 function claimNote(item: SampleItem, claimers: string[]): string | null {
@@ -81,29 +101,65 @@ interface BillPreviewProps {
   className?: string;
 }
 
+/** How long each phase holds before the next, in ms. Phase 2 wraps back to 0. */
+const HOLDS: Record<Phase, number> = { 0: 1200, 1: 1400, 2: 2600 };
+
+const FADE = { duration: 0.3, ease: 'easeOut' } as const;
+
+function subscribeVisibility(onChange: () => void) {
+  document.addEventListener('visibilitychange', onChange);
+  return () => document.removeEventListener('visibilitychange', onChange);
+}
+
+function isPageVisible() {
+  return document.visibilityState === 'visible';
+}
+
 /**
- * A sample bill drawn with the bill page's own row language. On first view the
- * viewer claims two items in sequence, then it holds still.
+ * A sample bill drawn with the bill page's own row language. While it is on screen
+ * the viewer claims two items in sequence, holds, then the claims fade away and the
+ * cycle repeats.
  */
 export function BillPreview({ className }: BillPreviewProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const inView = useInView(ref, { once: true, amount: 0.5 });
+  const inView = useInView(ref, { amount: 0.4 });
+  const pageVisible = useSyncExternalStore(subscribeVisibility, isPageVisible, () => true);
   const reduceMotion = useReducedMotion();
   const [animatedPhase, setAnimatedPhase] = useState<Phase>(0);
+  const looping = inView && pageVisible && !reduceMotion;
 
   useEffect(() => {
-    if (!inView || reduceMotion) return;
-    const first = window.setTimeout(() => setAnimatedPhase(1), 900);
-    const second = window.setTimeout(() => setAnimatedPhase(2), 1800);
-    return () => {
-      window.clearTimeout(first);
-      window.clearTimeout(second);
+    if (!looping) return;
+    let current: Phase = 0;
+    let timer = 0;
+    const step = () => {
+      current = ((current + 1) % 3) as Phase;
+      setAnimatedPhase(current);
+      timer = window.setTimeout(step, HOLDS[current]);
     };
-  }, [inView, reduceMotion]);
+    timer = window.setTimeout(step, HOLDS[0]);
+    return () => {
+      window.clearTimeout(timer);
+      // Restart from the resting state next time the loop resumes.
+      setAnimatedPhase(0);
+    };
+  }, [looping]);
 
   const phase: Phase = reduceMotion ? 2 : animatedPhase;
   const share = shareFor(phase);
   const myHex = getPersonHex(ME);
+
+  const shareValue = useMotionValue(0);
+  const shareText = useTransform(shareValue, (v) => formatCurrency(v));
+
+  useEffect(() => {
+    if (reduceMotion) {
+      shareValue.set(share);
+      return;
+    }
+    const controls = animate(shareValue, share, { duration: 0.6, ease: 'easeOut' });
+    return () => controls.stop();
+  }, [share, reduceMotion, shareValue]);
 
   return (
     <div
@@ -123,55 +179,72 @@ export function BillPreview({ className }: BillPreviewProps) {
       <div className="space-y-2.5">
         {ITEMS.map((item) => {
           const claimers = item.claims[phase];
-          const changed = !reduceMotion && claimers.length !== item.claims[0].length;
           const mine = claimers.includes(ME);
           const note = claimNote(item, claimers);
           const total = item.price * item.quantity;
           const myPortion = mine ? portion(item, claimers) : 0;
+          const gradient = rowGradient(item);
 
           return (
             <div
               key={item.id}
-              className={`rounded-xl p-3.5 transition-smooth sm:p-4 ${claimers.length === 0 ? 'bg-muted/50' : 'shadow-sm'}`}
+              className={`relative isolate rounded-xl p-3.5 transition-[background-color,box-shadow] duration-500 ease-out sm:p-4 ${claimers.length === 0 ? 'bg-muted/50' : 'shadow-sm'}`}
               style={rowStyle(claimers)}
             >
+              {gradient && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 -z-10 rounded-xl transition-opacity duration-500 ease-out"
+                  style={{ background: gradient, opacity: claimers.length > 1 ? 1 : 0 }}
+                />
+              )}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[15px] font-medium text-white sm:text-base">
                     {item.quantity > 1 && <span className="text-muted-foreground">{item.quantity}× </span>}
                     {item.name}
                   </div>
-                  {claimers.length > 0 && (
-                    <motion.div
-                      key={claimers.join(',')}
-                      className="mt-2 flex items-center gap-2"
-                      initial={changed ? { opacity: 0, scale: 0.6, x: -4 } : false}
-                      animate={{ opacity: 1, scale: 1, x: 0 }}
-                      transition={{ type: 'spring', stiffness: 500, damping: 28 }}
-                    >
-                      <AvatarStack names={claimers} max={4} size="sm" />
-                      {note && <span className="truncate text-xs text-muted-foreground">{note}</span>}
-                    </motion.div>
-                  )}
+                  <div className="mt-2 min-h-6">
+                    <AnimatePresence initial={false} mode="wait">
+                      {claimers.length > 0 && (
+                        <motion.div
+                          key={claimers.join(',')}
+                          className="flex items-center gap-2"
+                          initial={{ opacity: 0, scale: 0.9, y: 4 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.9, y: -4 }}
+                          transition={FADE}
+                        >
+                          <AvatarStack names={claimers} max={4} size="sm" />
+                          {note && <span className="truncate text-xs text-muted-foreground">{note}</span>}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
                 <div className="shrink-0 text-right">
                   <div className="text-[15px] font-semibold tabular-nums text-white sm:text-base">
                     {formatCurrency(total)}
                   </div>
-                  {mine && (
-                    <motion.div
-                      className="mt-1 flex items-center justify-end gap-1 text-sm"
-                      style={{ color: myHex }}
-                      initial={changed ? { opacity: 0, y: 4 } : false}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.25, ease: 'easeOut' }}
-                    >
-                      <Check className="size-4" strokeWidth={2} />
-                      <span className="tabular-nums">
-                        {item.quantity > 1 ? `1× = ${formatCurrency(myPortion)}` : 'Yours'}
-                      </span>
-                    </motion.div>
-                  )}
+                  <div className="mt-1 min-h-5">
+                    <AnimatePresence initial={false}>
+                      {mine && (
+                        <motion.div
+                          className="flex items-center justify-end gap-1 text-sm"
+                          style={{ color: myHex }}
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 4 }}
+                          transition={FADE}
+                        >
+                          <Check className="size-4" strokeWidth={2} />
+                          <span className="tabular-nums">
+                            {item.quantity > 1 ? `1× = ${formatCurrency(myPortion)}` : 'Yours'}
+                          </span>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
               </div>
             </div>
@@ -199,15 +272,7 @@ export function BillPreview({ className }: BillPreviewProps) {
           <AvatarInitials name={ME} size="sm" className="shadow-none" />
           <span className="text-sm font-medium text-white/70">Your share</span>
         </div>
-        <motion.span
-          key={share.toFixed(2)}
-          className="font-money text-2xl text-primary"
-          initial={phase === 0 || reduceMotion ? false : { opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, ease: 'easeOut' }}
-        >
-          {formatCurrency(share)}
-        </motion.span>
+        <motion.span className="font-money text-2xl tabular-nums text-primary">{shareText}</motion.span>
       </div>
     </div>
   );
