@@ -1,0 +1,38 @@
+{
+  "hero-desktop": {
+    "loaded": 1.97,
+    "end": 13.97,
+    "t0": 1791440478042
+  },
+  "create-phone": {
+    "loaded": 1.82,
+    "byHand": 1.96,
+    "item1": 4.66,
+    "item2": 6.83,
+    "item3": 8.95,
+    "continue": 10.73,
+    "details": 11.13,
+    "end": 14.64,
+    "t0": 1791440619954
+  },
+  "host-phone": {
+    "ready": 8.14,
+    "tapYuzu": 8.14,
+    "hostSeesYuzu": 10.63,
+    "tapChurros": 12.22,
+    "hostSeesChurros": 17.18,
+    "end": 19.68,
+    "viaUi": true,
+    "t0": 1791440835067
+  },
+  "guest-phone": {
+    "ready": 8.09,
+    "tapYuzu": 8.09,
+    "cta-Yuzu lemonade": 9.57,
+    "tapChurros": 12.17,
+    "cta-Churros": 13.52,
+    "end": 19.63,
+    "viaUi": true,
+    "t0": 1791440835118
+  }
+}

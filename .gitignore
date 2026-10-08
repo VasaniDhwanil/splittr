@@ -44,3 +44,11 @@ next-env.d.ts
 /test-results
 /playwright-report
 /playwright/.auth
+
+# Remotion renders
+video/out/
+
+# video project
+video/node_modules/
+video/public/footage/*.webm
+video/public/footage/*.mp4
