@@ -1,10 +1,14 @@
+'use client';
+
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
+import { motion } from 'framer-motion';
 import type { Bill } from '@/types';
 import { formatCurrency } from '@/lib/calculations';
 import { formatRelativeDate } from '@/lib/format-date';
 import { StatusDot } from './status-dot';
+import { useStagger } from './reveal';
 
 interface BillRowProps {
   id: string;
@@ -20,13 +24,16 @@ interface BillRowProps {
   archived?: boolean;
   /** Control at the row's end (before the chevron), e.g. archive/restore. Sits above the link. */
   action?: ReactNode;
+  /** Position in the list, for the mount stagger. Omit to appear at once. */
+  index?: number;
 }
 
 function Dot() {
   return <span aria-hidden>·</span>;
 }
 
-export function BillRow({ id, name, createdAt, status, peopleCount, total, role, archived, action }: BillRowProps) {
+export function BillRow({ id, name, createdAt, status, peopleCount, total, role, archived, action, index }: BillRowProps) {
+  const stagger = useStagger(index, archived ? 0.6 : 1);
   const meta: ReactNode[] = [];
   if (archived) meta.push(<span key="archived">Archived</span>);
   if (status) meta.push(<StatusDot key="status" status={status} />);
@@ -41,8 +48,9 @@ export function BillRow({ id, name, createdAt, status, peopleCount, total, role,
   if (role) meta.push(<span key="role">{role}</span>);
 
   return (
-    <div
-      className={`group relative flex min-h-[64px] items-center gap-3 px-4 py-3.5 transition-colors hover:bg-white/[0.04] ${archived ? 'opacity-60' : ''}`}
+    <motion.div
+      {...stagger}
+      className={`tactile group relative flex min-h-[64px] items-center gap-3 px-4 py-3.5 ${archived ? 'opacity-60' : ''}`}
     >
       <div className="min-w-0 flex-1">
         {/* Stretched link: the whole row navigates, while the action stays a separate control */}
@@ -60,7 +68,7 @@ export function BillRow({ id, name, createdAt, status, peopleCount, total, role,
         <span className="font-money shrink-0 whitespace-nowrap text-[15px] text-white">{formatCurrency(total)}</span>
       )}
       {action && <div className="relative z-10 shrink-0">{action}</div>}
-      <ChevronRight className="size-4 shrink-0 text-white/25" />
-    </div>
+      <ChevronRight className="size-4 shrink-0 text-white/25 transition-[color,translate] duration-200 group-hover:translate-x-0.5 group-hover:text-white/50" />
+    </motion.div>
   );
 }

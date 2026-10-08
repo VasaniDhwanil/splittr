@@ -90,13 +90,13 @@ function GroupJoin() {
     <main className="min-h-dvh flex flex-col items-center justify-center px-4 py-16">
       <div className="w-full max-w-sm">
         <Reveal>
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-10 text-center">
+          <div className="surface rounded-2xl px-6 py-10 text-center">
             {state === 'loading' && (
               <div className="animate-pulse space-y-3" aria-busy="true" aria-label="Loading invite">
-                <div className="mx-auto h-3 w-24 rounded-md bg-white/[0.06]" />
-                <div className="mx-auto h-8 w-44 rounded-md bg-white/[0.06]" />
-                <div className="mx-auto h-4 w-28 rounded-md bg-white/[0.06]" />
-                <div className="!mt-8 h-12 w-full rounded-full bg-white/[0.06]" />
+                <div className="mx-auto h-3 w-24 rounded-md bg-white/[0.05]" />
+                <div className="mx-auto h-8 w-44 rounded-md bg-white/[0.05]" />
+                <div className="mx-auto h-4 w-28 rounded-md bg-white/[0.05]" />
+                <div className="!mt-8 h-12 w-full rounded-full bg-white/[0.05]" />
               </div>
             )}
 

@@ -23,6 +23,8 @@ import { StandingsList } from '@/components/groups/standings-list';
 import { MemberList } from '@/components/groups/member-list';
 import { BillRow } from '@/components/groups/bill-row';
 import { GroupSkeleton } from '@/components/groups/group-skeleton';
+import { EmptyMark } from '@/components/groups/empty-mark';
+import { LIT_FIELD } from '@/components/create/field';
 
 
 interface GroupDetail extends Group {
@@ -239,7 +241,7 @@ export default function GroupPage() {
     return (
       <main className="min-h-dvh py-8">
         <div className="container mx-auto max-w-2xl px-4">
-          <div className="mb-8 h-5 w-28 rounded-md bg-white/[0.06] animate-pulse" />
+          <div className="mb-8 h-5 w-28 rounded-md bg-white/[0.05] animate-pulse" />
           <GroupSkeleton />
         </div>
       </main>
@@ -326,7 +328,7 @@ export default function GroupPage() {
               }
             >
               {myBalances.length > 0 ? (
-                <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
+                <div className="surface divide-y divide-white/[0.06] overflow-hidden rounded-2xl">
                   {[...iOwe, ...owedToMe].map((balance) => {
                     const person = balance.counterparty;
                     const member = group.members.find((m) => m.user_id === person.user_id);
@@ -392,13 +394,15 @@ export default function GroupPage() {
           >
             {group.bills.length === 0 ? (
               <p className="text-sm leading-relaxed text-white/40">
+                <EmptyMark className="mb-3 block" />
                 No bills yet. Create a bill and pick this group in the details step.
               </p>
             ) : (
-              <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
-                {group.bills.map((bill) => (
+              <div className="surface divide-y divide-white/[0.06] overflow-hidden rounded-2xl">
+                {group.bills.map((bill, i) => (
                   <BillRow
                     key={bill.id}
+                    index={i}
                     id={bill.id}
                     name={bill.name}
                     status={bill.status}
@@ -435,7 +439,7 @@ export default function GroupPage() {
                 value={renameValue}
                 onChange={(e) => setRenameValue(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleRename()}
-                className="border-white/10 bg-white/[0.03]"
+                className={LIT_FIELD}
               />
             </div>
             <Button className="w-full" onClick={handleRename} disabled={isSaving}>

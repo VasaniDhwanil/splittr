@@ -200,3 +200,50 @@
 .avatar-initials {
   @apply w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold;
 }
+
+/* ------------------------------------------------------------------
+   Warmth layer: lit surfaces and tactile rows (lit fields live in create/field.tsx).
+   In the components layer so Tailwind utilities (hover:, active:) win.
+   ------------------------------------------------------------------ */
+:root {
+  --surface-bg: rgb(255 255 255 / 0.035);
+  --surface-bg-hover: rgb(255 255 255 / 0.05);
+  --surface-border: rgb(255 255 255 / 0.1);
+  --surface-border-hover: rgb(255 255 255 / 0.15);
+  --surface-highlight: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  --surface-shadow:
+    var(--surface-highlight),
+    0 24px 48px -32px rgb(74 222 128 / 0.18),
+    0 1px 2px rgb(0 0 0 / 0.4);
+}
+
+@layer components {
+  /* Section surfaces, cards and row containers: a top highlight and a soft green-tinted drop. */
+  .surface {
+    border: 1px solid var(--surface-border);
+    background-color: var(--surface-bg);
+    box-shadow: var(--surface-shadow);
+  }
+
+  /* Pressable rows and cards: brighten, firm the border, give under the finger. */
+  .tactile {
+    transition-property: background-color, border-color, transform, scale, box-shadow;
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  @media (hover: hover) {
+    .tactile:hover {
+      background-color: var(--surface-bg-hover);
+      border-color: var(--surface-border-hover);
+    }
+  }
+  .tactile:active {
+    scale: 0.995;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tactile:active {
+    scale: none;
+  }
+}

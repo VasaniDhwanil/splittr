@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FIELD_INPUT } from '@/components/create/field';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { ArrowLeft, Loader2 } from 'lucide-react';
@@ -100,7 +101,7 @@ function SignInForm() {
                   autoComplete="email"
                   autoFocus
                   required
-                  className="border-white/10 bg-white/[0.03] text-white placeholder:text-white/30"
+                  className={FIELD_INPUT}
                 />
               </div>
 

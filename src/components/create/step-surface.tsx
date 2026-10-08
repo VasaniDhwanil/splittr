@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 /** The single surface each step sits on. */
 export function StepSurface({ children }: { children: ReactNode }) {
-  return <div className="space-y-6 rounded-2xl border border-white/10 bg-white/[0.02] p-5 sm:p-6">{children}</div>;
+  return <div className="surface space-y-6 rounded-2xl p-5 sm:p-6">{children}</div>;
 }
 
 interface StepActionsProps {

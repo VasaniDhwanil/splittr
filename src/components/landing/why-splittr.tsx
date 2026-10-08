@@ -33,7 +33,7 @@ function SettlePreview() {
   );
 }
 
-const cell = 'rounded-2xl border border-white/10 p-6 sm:p-8';
+const cell = 'surface rounded-2xl p-6 sm:p-8';
 
 export function WhySplittr() {
   return (
@@ -43,7 +43,7 @@ export function WhySplittr() {
       </InView>
 
       <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-3">
-        <InView className={`${cell} bg-white/[0.03] md:col-span-2`}>
+        <InView className={`${cell} md:col-span-2`}>
           <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
             <div>
               <h3 className="text-xl font-semibold tracking-tight text-white">Settle up fast</h3>
@@ -62,14 +62,14 @@ export function WhySplittr() {
           </p>
         </InView>
 
-        <InView className={`${cell} bg-white/[0.03]`}>
+        <InView className={`${cell}`}>
           <h3 className="text-xl font-semibold tracking-tight text-white">Split any way</h3>
           <p className="mt-2 text-base leading-relaxed text-white/50">
             By item, evenly, or custom amounts. Tax and tip stay fair either way.
           </p>
         </InView>
 
-        <InView delay={0.05} className={`${cell} bg-white/[0.03] md:col-span-2`}>
+        <InView delay={0.05} className={`${cell} md:col-span-2`}>
           <h3 className="text-xl font-semibold tracking-tight text-white">Updates in real time</h3>
           <p className="mt-2 max-w-md text-base leading-relaxed text-white/50">
             Claims and payments show up on every phone at the table the moment they happen.

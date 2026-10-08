@@ -164,7 +164,7 @@ export function BillPreview({ className }: BillPreviewProps) {
   return (
     <div
       ref={ref}
-      className={`rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-6 ${className ?? ''}`}
+      className={`surface rounded-2xl p-4 sm:p-6 ${className ?? ''}`}
       aria-label="Sample bill: Friday tacos, split four ways"
       role="img"
     >
@@ -267,7 +267,7 @@ export function BillPreview({ className }: BillPreviewProps) {
         </div>
       </dl>
 
-      <div className="mt-4 flex items-center justify-between gap-4 rounded-xl bg-white/[0.04] px-4 py-3.5">
+      <div className="mt-4 flex items-center justify-between gap-4 rounded-xl bg-white/[0.04] px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
         <div className="flex items-center gap-2.5">
           <AvatarInitials name={ME} size="sm" className="shadow-none" />
           <span className="text-sm font-medium text-white/70">Your share</span>

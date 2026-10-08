@@ -16,9 +16,9 @@ function Tile({ icon: Icon, label, onClick }: { icon: LucideIcon; label: string;
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-32 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/15 px-4 text-white outline-none transition-colors touch-manipulation hover:border-white/30 hover:bg-white/[0.03] focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="group flex min-h-32 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/15 bg-white/[0.02] px-4 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] outline-none transition-[background-color,border-color,color,transform,scale,box-shadow] duration-200 touch-manipulation hover:border-white/30 hover:bg-white/[0.05] active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-ring/50"
     >
-      <Icon className="size-6 text-white/60" aria-hidden />
+      <Icon className="size-6 text-white/60 transition-colors duration-200 group-hover:text-white" aria-hidden />
       <span className="font-medium">{label}</span>
     </button>
   );
@@ -35,8 +35,8 @@ export function ReceiptPicker({ isScanning, onTakePhoto, onUploadPhoto, onEnterB
         <div className="animate-pulse divide-y divide-white/[0.06]">
           {['w-2/5', 'w-1/2', 'w-1/3'].map((width) => (
             <div key={width} className="flex items-center justify-between gap-4 py-3.5">
-              <div className={`h-4 rounded-md bg-white/[0.06] ${width}`} />
-              <div className="h-4 w-14 rounded-md bg-white/[0.06]" />
+              <div className={`h-4 rounded-md bg-white/[0.05] ${width}`} />
+              <div className="h-4 w-14 rounded-md bg-white/[0.05]" />
             </div>
           ))}
         </div>

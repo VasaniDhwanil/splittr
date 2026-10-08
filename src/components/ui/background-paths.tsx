@@ -1,50 +1,64 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, useReducedMotion, type TargetAndTransition } from "framer-motion";
 
-export function FloatingPaths({ position }: { position: number }) {
-    const paths = Array.from({ length: 36 }, (_, i) => ({
-        id: i,
-        d: `M-${380 - i * 5 * position} -${189 + i * 6}C-${
-            380 - i * 5 * position
-        } -${189 + i * 6} -${312 - i * 5 * position} ${216 - i * 6} ${
-            152 - i * 5 * position
-        } ${343 - i * 6}C${616 - i * 5 * position} ${470 - i * 6} ${
-            684 - i * 5 * position
-        } ${875 - i * 6} ${684 - i * 5 * position} ${875 - i * 6}`,
-        width: 0.5 + i * 0.05,
-    }));
+interface Field {
+  color: string;
+  className: string;
+  drift: TargetAndTransition;
+  duration: number;
+}
 
-    return (
-        <div className="absolute inset-0 pointer-events-none">
-            <svg
-                className="w-full h-full text-emerald-400"
-                viewBox="0 0 696 316"
-                preserveAspectRatio="xMidYMid slice"
-                fill="none"
-            >
-                <title>Background Paths</title>
-                {paths.map((path) => (
-                    <motion.path
-                        key={path.id}
-                        d={path.d}
-                        stroke="currentColor"
-                        strokeWidth={path.width}
-                        strokeOpacity={0.08 + path.id * 0.025}
-                        initial={{ pathLength: 0.3, opacity: 0.6 }}
-                        animate={{
-                            pathLength: 1,
-                            opacity: [0.3, 0.6, 0.3],
-                            pathOffset: [0, 1, 0],
-                        }}
-                        transition={{
-                            duration: 20 + ((path.id * 7) % 10),
-                            repeat: Number.POSITIVE_INFINITY,
-                            ease: "linear",
-                        }}
-                    />
-                ))}
-            </svg>
-        </div>
-    );
+/**
+ * Ambient aurora: a few very large, heavily blurred light fields drifting slowly.
+ * Light, never a shape. Static when reduced motion is on.
+ */
+const FIELDS: Field[] = [
+  {
+    // Brand green, upper left: the main light source.
+    color: "rgba(74,222,128,0.16)",
+    className: "-left-[20vmax] -top-[22vmax] h-[60vmax] w-[60vmax]",
+    drift: { x: [0, 60, -20], y: [0, 40, 70], scale: [1, 1.08, 0.96] },
+    duration: 26,
+  },
+  {
+    // Cool mint/teal, lower right: a quieter counter light.
+    color: "rgba(45,212,191,0.10)",
+    className: "-right-[22vmax] -bottom-[24vmax] h-[64vmax] w-[64vmax]",
+    drift: { x: [0, -70, 10], y: [0, -50, -20], scale: [1, 0.94, 1.06] },
+    duration: 30,
+  },
+  {
+    // A faint green wash mid-right so long pages keep a little light.
+    color: "rgba(74,222,128,0.06)",
+    className: "right-[-10vmax] top-[30vh] h-[40vmax] w-[40vmax]",
+    drift: { x: [0, -40, 20], y: [0, 50, -30], scale: [1, 1.1, 1] },
+    duration: 22,
+  },
+];
+
+export function Aurora() {
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <div aria-hidden className="absolute inset-0 overflow-hidden">
+      {FIELDS.map((field, i) => (
+        <motion.div
+          key={i}
+          className={`absolute rounded-full will-change-transform ${field.className}`}
+          style={{
+            background: `radial-gradient(closest-side, ${field.color}, transparent)`,
+            filter: "blur(80px)",
+          }}
+          animate={reduceMotion ? undefined : field.drift}
+          transition={{
+            duration: field.duration,
+            repeat: Number.POSITIVE_INFINITY,
+            repeatType: "mirror",
+            ease: "easeInOut",
+          }}
+        />
+      ))}
+    </div>
+  );
 }

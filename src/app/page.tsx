@@ -12,12 +12,14 @@ import {
 } from '@/components/ui/dialog';
 import { Receipt, Loader2, X, Eye, EyeOff, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { LIT_FIELD } from '@/components/create/field';
 import { Label } from '@/components/ui/label';
 import { Bill, Participant } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 import { billTotal } from '@/lib/calculations';
 import { toast } from 'sonner';
 import { GroupCard } from '@/components/groups/group-card';
+import { EmptyMark } from '@/components/groups/empty-mark';
 import { GroupDialog } from '@/components/groups/group-dialog';
 import { BillRow } from '@/components/groups/bill-row';
 import { SiteNav } from '@/components/landing/site-nav';
@@ -68,17 +70,17 @@ interface GroupSummary {
 function BillListSkeleton({ rows = 2 }: { rows?: number }) {
   return (
     <div
-      className="animate-pulse divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]"
+      className="surface animate-pulse divide-y divide-white/[0.06] overflow-hidden rounded-2xl"
       aria-busy="true"
       aria-label="Loading bills"
     >
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="flex items-center gap-3 px-4 py-4">
           <div className="min-w-0 flex-1 space-y-2">
-            <div className="h-4 w-40 max-w-full rounded-md bg-white/[0.06]" />
+            <div className="h-4 w-40 max-w-full rounded-md bg-white/[0.05]" />
             <div className="h-3 w-24 rounded-md bg-white/[0.04]" />
           </div>
-          <div className="h-5 w-16 rounded-md bg-white/[0.06]" />
+          <div className="h-5 w-16 rounded-md bg-white/[0.05]" />
         </div>
       ))}
     </div>
@@ -347,14 +349,15 @@ export default function Home() {
   const billList = (
     <>
       {displayedBills.length > 0 && (
-        <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
-          {displayedBills.map((bill) => {
+        <div className="surface divide-y divide-white/[0.06] overflow-hidden rounded-2xl">
+          {displayedBills.map((bill, i) => {
             const details = billDetails[bill.id];
             const status = details?.status ?? bill.status;
             const isHidden = hiddenBillIds.has(bill.id);
             return (
               <BillRow
                 key={bill.id}
+                index={i}
                 id={bill.id}
                 name={bill.name}
                 createdAt={bill.created_at}
@@ -383,7 +386,8 @@ export default function Home() {
 
       {/* Empty state when all bills are hidden */}
       {visibleBills.length === 0 && hiddenBills.length > 0 && !showHidden && (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-8 text-center text-white/40">
+        <div className="surface flex flex-col items-center rounded-2xl px-4 py-8 text-center text-white/40">
+          <EmptyMark />
           <p>All bills are archived.</p>
           <Button
             variant="link"
@@ -446,7 +450,8 @@ export default function Home() {
               ) : allBills.length > 0 ? (
                 billList
               ) : (
-                <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-5 py-8 text-sm text-white/45">
+                <div className="surface rounded-2xl px-5 py-8 text-sm text-white/45">
+                  <EmptyMark />
                   No bills yet. Split one after your next dinner and it will show up here.
                 </div>
               )}
@@ -472,9 +477,10 @@ export default function Home() {
               </div>
               {groups.length > 0 && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {groups.map((group) => (
+                  {groups.map((group, i) => (
                     <GroupCard
                       key={group.id}
+                      index={i}
                       id={group.id}
                       name={group.name}
                       memberCount={group.member_count}
@@ -526,7 +532,7 @@ export default function Home() {
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCreateGroup()}
-              className="border-white/10 bg-white/[0.03]"
+              className={LIT_FIELD}
             />
           </div>
           <Button onClick={handleCreateGroup} disabled={isCreatingGroup} className="w-full">
@@ -558,7 +564,7 @@ export default function Home() {
               {claimableBills.map(bill => (
                 <div
                   key={bill.id}
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5 border border-white/10"
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.035] border border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
                 >
                   <Receipt className="h-4 w-4 text-white/40 shrink-0" />
                   <span className="text-sm text-white truncate">{bill.name}</span>

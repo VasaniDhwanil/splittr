@@ -17,10 +17,10 @@ interface ItemRowProps {
 }
 
 const GHOST_INPUT =
-  'h-11 min-w-0 rounded-lg border-0 bg-transparent px-2 text-base text-white outline-none transition-colors placeholder:text-white/30 hover:bg-white/[0.02] focus:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-ring/40 md:text-sm';
+  'h-11 min-w-0 rounded-lg border-0 bg-transparent px-2 text-base text-white outline-none transition-colors placeholder:text-white/30 hover:bg-white/[0.03] focus:bg-white/[0.04] focus:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] focus-visible:ring-2 focus-visible:ring-primary/40 md:text-sm';
 
 const STEP_BUTTON =
-  'flex size-11 shrink-0 items-center justify-center rounded-full text-white/50 outline-none transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-30 disabled:hover:bg-transparent';
+  'flex size-11 shrink-0 items-center justify-center rounded-full text-white/50 outline-none transition-[background-color,color,scale] duration-150 hover:bg-white/[0.06] hover:text-white active:scale-90 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-30 disabled:hover:bg-transparent';
 
 /** One editable receipt line: name, quantity stepper, price each, and a quiet delete. */
 export function ItemRow({ item, index, onChange, onRemove }: ItemRowProps) {

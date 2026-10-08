@@ -14,13 +14,13 @@ export function StepIndicator({ steps, current }: StepIndicatorProps) {
       {steps.map((label, i) => (
         <Fragment key={label}>
           {i > 0 && (
-            <li aria-hidden className={cn('h-px min-w-4 flex-1', i <= current ? 'bg-primary' : 'bg-white/10')} />
+            <li aria-hidden className={cn('h-px min-w-4 flex-1 transition-colors duration-300', i <= current ? 'bg-primary' : 'bg-white/10')} />
           )}
           <li
             aria-current={i === current ? 'step' : undefined}
             className={cn(
-              'shrink-0 font-medium',
-              i === current ? 'text-white' : i < current ? 'text-white/60' : 'text-white/30'
+              'shrink-0 font-medium transition-colors duration-300',
+              i === current ? 'text-primary' : i < current ? 'text-white/60' : 'text-white/30'
             )}
           >
             {label}

@@ -25,7 +25,7 @@ export function GroupsStatement() {
 
         <InView delay={0.05} className="lg:col-span-6 lg:col-start-7">
           <div
-            className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]"
+            className="surface overflow-hidden rounded-2xl"
             role="img"
             aria-label="Example group balances: you owe Marcus $42.60, Tomás owes you $18.25"
           >

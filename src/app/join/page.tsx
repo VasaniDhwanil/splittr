@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LIT_FIELD } from '@/components/create/field';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { ArrowLeft, Loader2 } from 'lucide-react';
@@ -86,7 +87,7 @@ export default function JoinPage() {
                 spellCheck={false}
                 aria-invalid={notFound || undefined}
                 aria-describedby={notFound ? 'code-error' : undefined}
-                className="h-16 border-white/10 bg-white/[0.03] text-center font-mono text-3xl uppercase tracking-widest text-white placeholder:text-white/20 md:text-3xl"
+                className={`h-16 ${LIT_FIELD} text-center font-mono text-3xl uppercase tracking-widest text-white placeholder:text-white/20 md:text-3xl`}
               />
               {notFound && (
                 <p id="code-error" role="alert" className="text-sm text-red-300/90">

@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { LIT_FIELD } from '@/components/create/field';
 import { GroupDialog } from './group-dialog';
 
 interface InviteDialogProps {
@@ -41,7 +42,7 @@ export function InviteDialog({
       <div className="space-y-6">
         {inviteUrl && (
           <div className="flex items-center gap-2">
-            <div className="flex h-11 min-w-0 flex-1 items-center rounded-xl border border-white/10 bg-white/[0.03] px-3">
+            <div className="flex h-11 min-w-0 flex-1 items-center rounded-xl border border-white/10 bg-white/[0.04] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
               <span className="truncate text-sm text-white/60">{inviteUrl.replace(/^https?:\/\//, '')}</span>
             </div>
             <Button variant="secondary" className="shrink-0" onClick={onCopy}>
@@ -63,7 +64,7 @@ export function InviteDialog({
               placeholder="name@example.com"
               value={email}
               onChange={(e) => onEmailChange(e.target.value)}
-              className="border-white/10 bg-white/[0.03]"
+              className={LIT_FIELD}
             />
             <Button type="submit" className="shrink-0" disabled={isSending || !email.trim()}>
               {isSending ? <Loader2 className="animate-spin" /> : 'Send'}

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FIELD_INPUT } from '@/components/create/field';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { ArrowLeft, Loader2, QrCode, Trash2 } from 'lucide-react';
@@ -136,7 +137,7 @@ export default function ProfilePage() {
     );
   }
 
-  const inputClass = 'border-white/10 bg-white/[0.03] text-white placeholder:text-white/30';
+  const inputClass = FIELD_INPUT;
   const labelClass = 'text-sm font-medium text-white/70';
 
   return (
@@ -244,7 +245,7 @@ export default function ProfilePage() {
                   onChange={(e) => handleQrSelected(e.target.files?.[0])}
                 />
                 {zelleQrUrl ? (
-                  <div className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+                  <div className="surface flex items-center gap-4 rounded-2xl p-3">
                     {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL */}
                     <img
                       src={zelleQrUrl}
@@ -277,7 +278,7 @@ export default function ProfilePage() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="w-full border-white/10 bg-white/[0.03] text-white/70 hover:text-white"
+                    className="w-full border-white/10 bg-white/[0.035] text-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:border-white/15 hover:bg-white/[0.05] hover:text-white"
                     onClick={() => qrInputRef.current?.click()}
                     disabled={isUploadingQr}
                   >
@@ -312,7 +313,7 @@ export default function ProfilePage() {
 }
 
 function Block({ className }: { className: string }) {
-  return <div className={`rounded-md bg-white/[0.06] ${className}`} />;
+  return <div className={`rounded-md bg-white/[0.05] ${className}`} />;
 }
 
 /** Page-shaped placeholder: title, name field, handle fields. */

@@ -13,7 +13,7 @@ export function SiteNav({ user, onSignOut }: SiteNavProps) {
     <header className="flex h-16 items-center justify-between gap-4">
       <Wordmark />
       {user ? (
-        <div className="flex min-w-0 items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] py-1 pr-1 pl-4">
+        <div className="flex min-w-0 items-center gap-1 surface rounded-full py-1 pr-1 pl-4">
           <Link
             href="/profile"
             className="min-w-0 truncate text-sm text-white/60 transition-colors hover:text-white"

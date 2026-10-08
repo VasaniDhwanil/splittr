@@ -16,10 +16,10 @@ interface SegmentedProps<T extends string> {
   className?: string;
 }
 
-/** One rounded track with equal-width options; the selected one is a white pill. */
+/** One rounded track with equal-width options; the selected one is a green pill. */
 export function Segmented<T extends string>({ options, value, onChange, ariaLabel, className }: SegmentedProps<T>) {
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className={cn('flex w-full rounded-full bg-white/[0.04] p-1', className)}>
+    <div role="radiogroup" aria-label={ariaLabel} className={cn('flex w-full rounded-full bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]', className)}>
       {options.map((option) => {
         const selected = option.value === value;
         return (
@@ -30,8 +30,10 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
             aria-checked={selected}
             onClick={() => onChange(option.value)}
             className={cn(
-              'min-h-11 min-w-0 flex-1 truncate rounded-full px-2 text-sm font-medium outline-none transition-colors touch-manipulation focus-visible:ring-2 focus-visible:ring-ring/50',
-              selected ? 'bg-white text-black' : 'text-white/60 hover:text-white'
+              'min-h-11 min-w-0 flex-1 truncate rounded-full px-2 text-sm font-medium outline-none transition-[background-color,border-color,color,transform,scale,box-shadow] duration-200 touch-manipulation active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-ring/50',
+              selected
+                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
+                : 'text-white/60 hover:bg-white/[0.05] hover:text-white'
             )}
           >
             {option.label}
