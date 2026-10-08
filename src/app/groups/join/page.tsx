@@ -4,9 +4,9 @@ import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Loader2, Users, SearchX } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { Reveal } from '@/components/groups/reveal';
 import { createClient } from '@/lib/supabase/client';
 
 export default function GroupJoinPage() {
@@ -89,38 +89,41 @@ function GroupJoin() {
   return (
     <main className="min-h-dvh flex flex-col items-center justify-center px-4 py-16">
       <div className="w-full max-w-sm">
-        <Card className="shadow-lg">
-          <CardContent className="py-10 text-center">
-            {state === 'loading' && <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />}
+        <Reveal>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-10 text-center">
+            {state === 'loading' && (
+              <div className="animate-pulse space-y-3" aria-busy="true" aria-label="Loading invite">
+                <div className="mx-auto h-3 w-24 rounded-md bg-white/[0.06]" />
+                <div className="mx-auto h-8 w-44 rounded-md bg-white/[0.06]" />
+                <div className="mx-auto h-4 w-28 rounded-md bg-white/[0.06]" />
+                <div className="!mt-8 h-12 w-full rounded-full bg-white/[0.06]" />
+              </div>
+            )}
 
             {state === 'signin' && (
               <>
-                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Users className="h-7 w-7 text-primary" />
-                </div>
-                <h1 className="text-xl font-semibold mb-2">You&apos;re invited to a group</h1>
-                <p className="text-muted-foreground text-sm mb-6">
-                  Sign in with your email to join — takes 10 seconds, no password.
+                <p className="text-xs font-medium uppercase tracking-wider text-white/40">Group invite</p>
+                <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">You&apos;re invited</h1>
+                <p className="mt-2 text-sm leading-relaxed text-white/40">
+                  Sign in with your email to join. No password, about ten seconds.
                 </p>
-                <Link href={`/signin?next=${encodeURIComponent(`/groups/join?code=${code}`)}`}>
-                  <Button size="lg" className="w-full">Sign in to join</Button>
-                </Link>
+                <Button asChild size="lg" className="mt-8 w-full">
+                  <Link href={`/signin?next=${encodeURIComponent(`/groups/join?code=${code}`)}`}>Sign in to join</Link>
+                </Button>
               </>
             )}
 
             {state === 'preview' && preview && (
               <>
-                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Users className="h-7 w-7 text-primary" />
-                </div>
-                <h1 className="text-2xl font-bold mb-1">{preview.name}</h1>
-                <p className="text-muted-foreground text-sm mb-6">
-                  {preview.member_count} member{preview.member_count !== 1 && 's'} · You&apos;ve been invited
+                <p className="text-xs font-medium uppercase tracking-wider text-white/40">You&apos;re invited to</p>
+                <h1 className="mt-3 break-words text-3xl font-semibold tracking-tight text-white">{preview.name}</h1>
+                <p className="mt-2 text-sm tabular-nums text-white/40">
+                  {preview.member_count} member{preview.member_count !== 1 && 's'}
                 </p>
-                <Button size="lg" className="w-full" onClick={handleJoin} disabled={isJoining}>
+                <Button size="lg" className="mt-8 w-full" onClick={handleJoin} disabled={isJoining}>
                   {isJoining ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="animate-spin" />
                       Joining...
                     </>
                   ) : (
@@ -132,20 +135,17 @@ function GroupJoin() {
 
             {state === 'invalid' && (
               <>
-                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                  <SearchX className="h-6 w-6 text-white/50" />
-                </div>
-                <h1 className="text-xl font-semibold mb-2">Invite not found</h1>
-                <p className="text-muted-foreground text-sm mb-6">
-                  This invite link is invalid or the group was deleted.
+                <h1 className="text-2xl font-semibold tracking-tight text-white">Invite not found</h1>
+                <p className="mt-2 text-sm leading-relaxed text-white/40">
+                  This invite link is invalid, or the group was deleted.
                 </p>
-                <Link href="/">
-                  <Button size="lg">Back to Home</Button>
-                </Link>
+                <Button asChild variant="secondary" size="lg" className="mt-8 w-full">
+                  <Link href="/">Back to home</Link>
+                </Button>
               </>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Reveal>
       </div>
     </main>
   );

@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -12,13 +11,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Receipt, Users, Calculator, Share2, ChevronRight, Loader2, X, Eye, EyeOff, CheckCircle2, Clock, Plus, Wallet } from 'lucide-react';
+import { Receipt, Users, Calculator, Share2, Loader2, X, Eye, EyeOff, Plus, Wallet } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { formatCurrency } from '@/lib/calculations';
 import { Bill, Participant } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { GroupCard } from '@/components/groups/group-card';
+import { GroupDialog } from '@/components/groups/group-dialog';
+import { BillRow } from '@/components/groups/bill-row';
 
 
 interface StoredBill {
@@ -40,6 +41,7 @@ interface GroupSummary {
   bill_count: number;
   total_amount: number;
   active_count: number;
+  member_count?: number;
 }
 
 export default function Home() {
@@ -378,98 +380,47 @@ export default function Home() {
                   variant="ghost"
                   size="sm"
                   onClick={() => setShowHidden(!showHidden)}
-                  className="text-white/40 hover:text-white"
+                  className="text-white/60 hover:text-white hover:bg-white/[0.06]"
                 >
-                  {showHidden ? (
-                    <>
-                      <EyeOff className="h-4 w-4 mr-2" />
-                      Hide {hiddenBills.length} archived bill{hiddenBills.length > 1 ? 's' : ''}
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="h-4 w-4 mr-2" />
-                      Show {hiddenBills.length} archived bill{hiddenBills.length > 1 ? 's' : ''}
-                    </>
-                  )}
+                  {showHidden ? <EyeOff /> : <Eye />}
+                  {showHidden ? 'Hide' : 'Show'} {hiddenBills.length} archived bill{hiddenBills.length > 1 ? 's' : ''}
                 </Button>
               </div>
             )}
 
-            <div className="grid gap-4 max-w-2xl mx-auto">
-              {displayedBills.map((bill) => {
-                const details = billDetails[bill.id];
-                const isHidden = hiddenBillIds.has(bill.id);
-                return (
-                  <Link key={bill.id} href={`/bill/${bill.id}`}>
-                    <Card className={`bg-white/5 border-white/10 backdrop-blur-sm hover:bg-white/10 transition-smooth cursor-pointer shadow-sm hover:shadow-md group ${isHidden ? 'opacity-60' : ''}`}>
-                      <CardContent className="py-4">
-                        <div className="flex justify-between items-center">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="font-semibold text-white">{bill.name}</h3>
-                              <Badge
-                                variant={bill.role === 'creator' ? 'default' : 'secondary'}
-                                className={`text-xs ${bill.role === 'creator' ? 'bg-white/10 text-white/80 border-white/20' : 'bg-white/5 text-white/60 border-white/10'}`}
-                              >
-                                {bill.role === 'creator' ? 'Host' : 'Joined'}
-                              </Badge>
-                              {details?.status === 'settled' ? (
-                                <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/20">
-                                  <CheckCircle2 className="h-3 w-3 mr-1" />
-                                  Settled
-                                </Badge>
-                              ) : details?.status === 'active' ? (
-                                <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-400 border-amber-500/20">
-                                  <Clock className="h-3 w-3 mr-1" />
-                                  Active
-                                </Badge>
-                              ) : null}
-                              {isHidden && (
-                                <Badge variant="outline" className="text-xs border-white/20 text-white/40">
-                                  Archived
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="text-sm text-white/40 mt-1">
-                              Code: <span className="font-mono">{bill.short_code}</span>
-                              {details && (
-                                <span className="ml-3">
-                                  {details.participants?.length || 0} people · {formatCurrency(details.subtotal + details.tax + details.tip_amount)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {isHidden ? (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-9 w-9 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-white/40 hover:text-white"
-                                onClick={(e) => handleUnhideBill(e, bill.id)}
-                                title="Restore bill"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-9 w-9 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-white/40 hover:text-white"
-                                onClick={(e) => handleHideBill(e, bill.id)}
-                                title="Archive bill"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            )}
-                            <ChevronRight className="h-5 w-5 text-white/30" />
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                );
-              })}
-            </div>
+            {displayedBills.length > 0 && (
+              <div className="max-w-2xl mx-auto divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
+                {displayedBills.map((bill) => {
+                  const details = billDetails[bill.id];
+                  const isHidden = hiddenBillIds.has(bill.id);
+                  return (
+                    <BillRow
+                      key={bill.id}
+                      id={bill.id}
+                      name={bill.name}
+                      createdAt={bill.created_at}
+                      status={details && details.status !== 'draft' ? details.status : undefined}
+                      peopleCount={details ? details.participants?.length || 0 : undefined}
+                      total={details ? details.subtotal + details.tax + details.tip_amount : undefined}
+                      role={bill.role === 'creator' ? 'Host' : 'Joined'}
+                      archived={isHidden}
+                      action={
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-white/40 hover:text-white hover:bg-white/[0.06]"
+                          onClick={(e) => (isHidden ? handleUnhideBill(e, bill.id) : handleHideBill(e, bill.id))}
+                          title={isHidden ? 'Restore bill' : 'Archive bill'}
+                          aria-label={isHidden ? 'Restore bill' : 'Archive bill'}
+                        >
+                          {isHidden ? <Eye /> : <X />}
+                        </Button>
+                      }
+                    />
+                  );
+                })}
+              </div>
+            )}
 
             {/* Empty state when all bills are hidden */}
             {visibleBills.length === 0 && hiddenBills.length > 0 && !showHidden && (
@@ -500,39 +451,33 @@ export default function Home() {
             <p className="text-center text-white/40 text-sm mb-6">
               Roommates, trips, events — keep recurring bills together.
             </p>
-            <div className="grid gap-4 sm:grid-cols-2 max-w-2xl mx-auto">
-              {groups.map((group) => (
-                <Link key={group.id} href={`/groups/${group.id}`}>
-                  <Card className="bg-white/5 border-white/10 backdrop-blur-sm hover:bg-white/10 transition-smooth cursor-pointer shadow-sm hover:shadow-md h-full">
-                    <CardContent className="py-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-                            <Users className="h-5 w-5 text-white/50" />
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-white">{group.name}</h3>
-                            <p className="text-sm text-white/40">
-                              {group.bill_count} bill{group.bill_count !== 1 && 's'}
-                              {group.bill_count > 0 && ` · ${formatCurrency(group.total_amount)}`}
-                              {group.active_count > 0 && ` · ${group.active_count} active`}
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight className="h-5 w-5 text-white/30" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
-              <button
-                type="button"
-                onClick={() => setShowCreateGroup(true)}
-                className="rounded-xl border border-dashed border-white/20 bg-white/5 hover:bg-white/10 transition-smooth p-4 flex items-center justify-center gap-2 text-white/50 hover:text-white min-h-[72px]"
-              >
-                <Plus className="h-5 w-5" />
-                New group
-              </button>
+            <div className="max-w-2xl mx-auto">
+              {groups.length > 0 && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {groups.map((group) => (
+                    <GroupCard
+                      key={group.id}
+                      id={group.id}
+                      name={group.name}
+                      memberCount={group.member_count}
+                      billCount={group.bill_count}
+                      totalAmount={group.total_amount}
+                      activeCount={group.active_count}
+                    />
+                  ))}
+                </div>
+              )}
+              <div className="mt-4 flex justify-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowCreateGroup(true)}
+                  className="text-white/60 hover:text-white hover:bg-white/[0.06]"
+                >
+                  <Plus />
+                  New group
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -632,43 +577,36 @@ export default function Home() {
       </div>
 
       {/* Create group dialog */}
-      <Dialog open={showCreateGroup} onOpenChange={setShowCreateGroup}>
-        <DialogContent className="sm:max-w-md bg-[#0a0a0a] border-white/10 text-white">
-          <DialogHeader>
-            <DialogTitle className="text-white text-xl">New group</DialogTitle>
-            <DialogDescription className="text-white/50">
-              Group bills for roommates, a trip, or anything recurring.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 pt-2">
-            <div className="space-y-2">
-              <Label htmlFor="newGroupName" className="text-white/70">Name</Label>
-              <Input
-                id="newGroupName"
-                placeholder="e.g., Lake house trip"
-                value={newGroupName}
-                onChange={(e) => setNewGroupName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleCreateGroup()}
-                className="bg-white/5 border-white/10 text-white"
-              />
-            </div>
-            <Button
-              onClick={handleCreateGroup}
-              disabled={isCreatingGroup}
-              className="w-full bg-white text-black hover:bg-white/90 transition-smooth rounded-full font-medium"
-            >
-              {isCreatingGroup ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                'Create group'
-              )}
-            </Button>
+      <GroupDialog
+        open={showCreateGroup}
+        onOpenChange={setShowCreateGroup}
+        title="New group"
+        description="Group bills for roommates, a trip, or anything recurring."
+      >
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <Label htmlFor="newGroupName" className="text-sm font-medium text-white/70">Name</Label>
+            <Input
+              id="newGroupName"
+              placeholder="e.g., Lake house trip"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateGroup()}
+              className="border-white/10 bg-white/[0.03]"
+            />
           </div>
-        </DialogContent>
-      </Dialog>
+          <Button onClick={handleCreateGroup} disabled={isCreatingGroup} className="w-full">
+            {isCreatingGroup ? (
+              <>
+                <Loader2 className="animate-spin" />
+                Creating...
+              </>
+            ) : (
+              'Create group'
+            )}
+          </Button>
+        </div>
+      </GroupDialog>
 
       {/* Claim bills dialog */}
       <Dialog open={showClaimPrompt} onOpenChange={(open) => { if (!open) handleSkipClaim(); }}>

@@ -4,43 +4,26 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import {
-  ArrowLeft,
-  Loader2,
-  Pencil,
-  Trash2,
-  ChevronRight,
-  CheckCircle2,
-  Clock,
-  Receipt,
-  Plus,
-  UserPlus,
-  Copy,
-  Mail,
-  LogOut,
-  Lock,
-  ExternalLink,
-  Scale,
-  Users,
-} from 'lucide-react';
+import { ArrowLeft, Check, Loader2, Plus } from 'lucide-react';
 import { formatCurrency, billTotal } from '@/lib/calculations';
 import { computeGroupLedger, netBalancesFor, NetBalance } from '@/lib/balances';
 import type { BillDetail } from '@/lib/balances';
 import { getPaymentOptions } from '@/lib/payment-links';
 import { Group, GroupMember, BillWithParticipants } from '@/types';
-import { AvatarInitials, getPersonHex } from '@/components/avatar-initials';
+import { Reveal } from '@/components/groups/reveal';
+import { Section } from '@/components/groups/section';
+import { GroupHeader } from '@/components/groups/group-header';
+import { InviteDialog } from '@/components/groups/invite-dialog';
+import { GroupDialog, ConfirmDialog } from '@/components/groups/group-dialog';
+import { BalanceRow } from '@/components/groups/balance-row';
+import { StandingsList } from '@/components/groups/standings-list';
+import { MemberList } from '@/components/groups/member-list';
+import { BillRow } from '@/components/groups/bill-row';
+import { GroupSkeleton } from '@/components/groups/group-skeleton';
+
 
 interface GroupDetail extends Group {
   is_owner: boolean;
@@ -70,6 +53,7 @@ export default function GroupPage() {
   const [settlingKey, setSettlingKey] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [isInviting, setIsInviting] = useState(false);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
 
   const fetchGroup = useCallback(async () => {
     try {
@@ -254,9 +238,9 @@ export default function GroupPage() {
   if (isLoading) {
     return (
       <main className="min-h-dvh py-8">
-        <div className="container mx-auto px-4 max-w-2xl flex flex-col justify-center items-center min-h-[60vh]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">Loading group...</p>
+        <div className="container mx-auto max-w-2xl px-4">
+          <div className="mb-8 h-5 w-28 rounded-md bg-white/[0.06] animate-pulse" />
+          <GroupSkeleton />
         </div>
       </main>
     );
@@ -265,25 +249,20 @@ export default function GroupPage() {
   if (unauthorized || !group) {
     return (
       <main className="min-h-dvh py-8">
-        <div className="container mx-auto px-4 max-w-2xl">
-          <Card className="shadow-lg">
-            <CardContent className="py-12 text-center">
-              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                <Lock className="h-6 w-6 text-white/50" />
-              </div>
-              <h2 className="text-xl font-semibold mb-2">
-                {unauthorized ? 'Sign in required' : 'Group not found'}
-              </h2>
-              <p className="text-muted-foreground mb-6">
-                {unauthorized
-                  ? 'Groups are tied to your account. Sign in to view this group.'
-                  : "This group doesn't exist or you're not a member."}
-              </p>
-              <Link href={unauthorized ? '/signin' : '/'}>
-                <Button size="lg">{unauthorized ? 'Sign in' : 'Back to Home'}</Button>
-              </Link>
-            </CardContent>
-          </Card>
+        <div className="container mx-auto flex min-h-[60vh] max-w-sm flex-col items-center justify-center px-4 text-center">
+          <Reveal>
+            <h2 className="text-2xl font-semibold tracking-tight text-white">
+              {unauthorized ? 'Sign in required' : 'Group not found'}
+            </h2>
+            <p className="mt-2 text-sm text-white/40">
+              {unauthorized
+                ? 'Groups are tied to your account. Sign in to view this group.'
+                : "This group doesn't exist or you're not a member."}
+            </p>
+            <Button asChild className="mt-8" variant={unauthorized ? 'default' : 'secondary'}>
+              <Link href={unauthorized ? '/signin' : '/'}>{unauthorized ? 'Sign in' : 'Back to home'}</Link>
+            </Button>
+          </Reveal>
         </div>
       </main>
     );
@@ -294,435 +273,201 @@ export default function GroupPage() {
   const iOwe = myBalances.filter((b) => b.amount > 0);
   const owedToMe = myBalances.filter((b) => b.amount < 0);
 
+  const meta = [
+    `${group.members.length} member${group.members.length !== 1 ? 's' : ''}`,
+    `${group.bills.length} bill${group.bills.length !== 1 ? 's' : ''}`,
+    `${formatCurrency(totalSpend)} total`,
+    ...(activeBills.length > 0 ? [`${activeBills.length} active`] : []),
+  ];
+  const inviteUrl =
+    group.invite_code && typeof window !== 'undefined'
+      ? `${window.location.origin}/groups/join?code=${group.invite_code}`
+      : null;
+  const showBalances = myBalances.length > 0 || group.bills.length > 0;
+
+  let sectionIndex = 1;
+
   return (
     <main className="min-h-dvh py-8">
-      <div className="container mx-auto px-4 max-w-2xl">
-        <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Home
+      <div className="container mx-auto max-w-2xl px-4">
+        <Link
+          href="/"
+          className="mb-8 inline-flex h-11 items-center gap-2 text-sm text-white/40 transition-colors hover:text-white"
+        >
+          <ArrowLeft className="size-4" />
+          Home
         </Link>
 
-        {/* Group Header */}
-        <Card className="mb-6 shadow-sm">
-          <CardContent className="py-5">
-            <div className="flex justify-between items-start gap-3 flex-wrap">
-              <div>
-                <h1 className="text-2xl font-bold flex items-center gap-2">
-                                    {group.name}
-                </h1>
-                <p className="text-muted-foreground text-sm mt-1">
-                  {group.members.length} member{group.members.length !== 1 && 's'} ·{' '}
-                  {group.bills.length} bill{group.bills.length !== 1 && 's'} ·{' '}
-                  {formatCurrency(totalSpend)} total
-                  {activeBills.length > 0 && ` · ${activeBills.length} active`}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="transition-smooth hover:scale-105"
-                  title="Copy invite link"
-                  onClick={handleCopyInvite}
-                >
-                  <UserPlus className="h-4 w-4" />
-                </Button>
-                {group.is_owner && (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="transition-smooth hover:scale-105"
-                      title="Edit group"
-                      onClick={() => {
-                        setRenameValue(group.name);
-                                        setShowRenameDialog(true);
-                      }}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="transition-smooth hover:scale-105 text-destructive/70 hover:text-destructive"
-                      title="Delete group"
-                      onClick={() => setShowDeleteDialog(true)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </>
-                )}
-                {!group.is_owner && (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="transition-smooth hover:scale-105 text-destructive/70 hover:text-destructive"
-                    title="Leave group"
-                    onClick={() => setShowLeaveDialog(true)}
-                  >
-                    <LogOut className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            </div>
-            <Button variant="outline" size="sm" className="mt-4 w-full" onClick={handleCopyInvite}>
-              <Copy className="h-4 w-4 mr-2" />
-              Copy invite link
-            </Button>
-            <form onSubmit={handleEmailInvite} className="mt-2 flex gap-2">
-              <Input
-                type="text"
-                inputMode="email"
-                autoComplete="off"
-                placeholder="Invite by email — commas for several"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                className="h-9"
-              />
-              <Button
-                type="submit"
-                size="sm"
-                variant="outline"
-                disabled={isInviting || !inviteEmail.trim()}
-                className="shrink-0"
-              >
-                {isInviting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    <Mail className="h-4 w-4 mr-2" />
-                    Send
-                  </>
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+        <div className="space-y-10">
+          <Reveal index={0}>
+            <GroupHeader
+              name={group.name}
+              meta={meta}
+              isOwner={group.is_owner}
+              onInvite={() => setShowInviteDialog(true)}
+              onEdit={() => {
+                setRenameValue(group.name);
+                setShowRenameDialog(true);
+              }}
+              onDelete={() => setShowDeleteDialog(true)}
+              onLeave={() => setShowLeaveDialog(true)}
+            />
+          </Reveal>
 
-        {/* Your balances — the Splitwise view */}
-        {myBalances.length > 0 && (
-          <Card className="mb-6 shadow-sm border-primary/20">
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Scale className="h-5 w-5 text-primary" />
-                Your balances
-              </CardTitle>
-              <CardDescription>
-                Netted across every bill in this group. Settling clears the whole balance
-                between you and that person.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {[...iOwe, ...owedToMe].map((balance) => {
-                const person = balance.counterparty;
-                const member = group.members.find((m) => m.user_id === person.user_id);
-                const payOptions =
-                  balance.amount > 0 && member?.profile
-                    ? getPaymentOptions(member.profile, balance.amount, `Splittr: ${group.name}`)
-                    : [];
-                return (
-                  <div key={person.key} className="p-4 rounded-xl bg-muted/50 space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <AvatarInitials name={person.name} size="md" />
-                        <div className="min-w-0">
-                          <div className="font-medium truncate">
-                            {balance.amount > 0 ? (
-                              <>You owe {person.name}</>
-                            ) : (
-                              <>{person.name} owes you</>
-                            )}
-                          </div>
-                          {!person.user_id && (
-                            <div className="text-xs text-muted-foreground">
-                              guest — matched by name
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <span
-                        className="text-xl font-money shrink-0"
-                        style={{ color: balance.amount > 0 ? '#fbbf24' : '#4ade80' }}
-                      >
-                        {formatCurrency(Math.abs(balance.amount))}
-                      </span>
-                    </div>
-
-                    {payOptions.length > 0 && (
-                      <div className="grid gap-2">
-                        {payOptions.map((option) => (
-                          <a
-                            key={option.key}
-                            href={option.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-between px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-smooth text-sm"
-                          >
-                            <span className="flex items-center gap-2">
-                              <span
-                                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                                style={{ backgroundColor: option.color }}
-                              >
-                                {option.label[0]}
-                              </span>
-                              <span className="font-medium">{option.label}</span>
-                              <span className="text-muted-foreground">{option.handle}</span>
-                            </span>
-                            <span className="flex items-center gap-1.5 font-semibold text-primary">
-                              {formatCurrency(balance.amount)}
-                              <ExternalLink className="h-3.5 w-3.5" />
-                            </span>
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                    {balance.amount > 0 && payOptions.length === 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        {person.name} hasn&apos;t set payment handles on their profile — pay them
-                        however you usually do, then settle up.
-                      </p>
-                    )}
-
-                    <Button
-                      variant={balance.amount > 0 ? 'default' : 'outline'}
-                      size="sm"
-                      className="w-full"
-                      disabled={settlingKey === person.key}
-                      onClick={() => handleSettle(balance)}
-                    >
-                      {settlingKey === person.key ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <CheckCircle2 className="h-4 w-4 mr-2" />
-                      )}
-                      {balance.amount > 0 ? "I've paid — settle up" : 'Mark as settled'}
-                    </Button>
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Group standings — who's owed, who owes */}
-        {standings.length > 0 && (
-          <Card className="mb-6 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg">Group standings</CardTitle>
-              <CardDescription>People owed money are on top.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {standings.map((person) => (
-                <div
-                  key={`${person.user_id ?? person.name}`}
-                  className="flex items-center justify-between p-3 rounded-xl bg-muted/50"
-                >
-                  <div className="flex items-center gap-3">
-                    <AvatarInitials name={person.name} size="sm" />
-                    <span className="font-medium text-sm">{person.name}</span>
-                  </div>
-                  {person.net < 0 ? (
-                    <span className="text-sm font-money text-green-400">
-                      gets back {formatCurrency(-person.net)}
-                    </span>
-                  ) : (
-                    <span className="text-sm font-money text-amber-400">
-                      owes {formatCurrency(person.net)}
-                    </span>
-                  )}
+          {/* Your balances: netted across every bill in the group */}
+          {showBalances && (
+            <Section
+              index={sectionIndex++}
+              title="Balances"
+              description={
+                myBalances.length > 0
+                  ? 'Netted across every bill here. Settling clears the whole balance with that person.'
+                  : undefined
+              }
+            >
+              {myBalances.length > 0 ? (
+                <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
+                  {[...iOwe, ...owedToMe].map((balance) => {
+                    const person = balance.counterparty;
+                    const member = group.members.find((m) => m.user_id === person.user_id);
+                    const payOptions =
+                      balance.amount > 0 && member?.profile
+                        ? getPaymentOptions(member.profile, balance.amount, `Splittr: ${group.name}`)
+                        : [];
+                    return (
+                      <BalanceRow
+                        key={person.key}
+                        name={person.name}
+                        isGuest={!person.user_id}
+                        amount={balance.amount}
+                        payOptions={payOptions}
+                        isSettling={settlingKey === person.key}
+                        onSettle={() => handleSettle(balance)}
+                      />
+                    );
+                  })}
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
+              ) : (
+                <p className="flex items-center gap-2 text-sm text-white/50">
+                  <Check className="size-4 text-primary" />
+                  You&apos;re all settled up in this group.
+                </p>
+              )}
+            </Section>
+          )}
 
-        {myBalances.length === 0 && group.bills.length > 0 && (
-          <Card className="mb-6 shadow-sm">
-            <CardContent className="py-6 text-center text-muted-foreground text-sm">
-              <CheckCircle2 className="h-6 w-6 mx-auto mb-2 text-green-400" />
-              You&apos;re all settled up in this group.
-            </CardContent>
-          </Card>
-        )}
+          {/* Group standings: who's owed, who owes */}
+          {standings.length > 0 && (
+            <Section index={sectionIndex++} title="Standings" description="Everyone's position. People owed money first.">
+              <StandingsList standings={standings} />
+            </Section>
+          )}
 
-        {/* Members */}
-        <Card className="mb-6 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex justify-between items-center">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Users className="h-5 w-5 text-primary" />
-                Members ({group.members.length})
-              </CardTitle>
-              <Button size="sm" variant="outline" onClick={handleCopyInvite}>
-                <UserPlus className="h-4 w-4 mr-1.5" />
-                Invite
+          <Section index={sectionIndex++} title="Members" count={group.members.length}>
+            <MemberList
+              members={group.members.map((member) => ({
+                id: member.id,
+                name: member.display_name,
+                isYou: member.user_id === group.me,
+                isOwner: member.role === 'owner',
+                hasPaymentHandles: Boolean(
+                  member.profile?.venmo_handle || member.profile?.cashapp_handle || member.profile?.paypal_handle
+                ),
+              }))}
+            />
+          </Section>
+
+          <Section
+            index={sectionIndex++}
+            title="Bills"
+            count={group.bills.length || undefined}
+            action={
+              <Button asChild variant="ghost" size="sm" className="text-white/60 hover:bg-white/[0.06] hover:text-white">
+                <Link href="/create">
+                  <Plus />
+                  New bill
+                </Link>
               </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-3">
-              {group.members.map((member) => {
-                const hex = getPersonHex(member.display_name);
-                const hasPay = Boolean(
-                  member.profile?.venmo_handle ||
-                    member.profile?.cashapp_handle ||
-                    member.profile?.paypal_handle
-                );
-                return (
-                  <div
-                    key={member.id}
-                    className="flex items-center gap-2 px-3 py-2 rounded-full"
-                    style={{ backgroundColor: `${hex}1f` }}
-                    title={hasPay ? 'Payment handles configured' : 'No payment handles yet'}
-                  >
-                    <AvatarInitials name={member.display_name} size="sm" />
-                    <span className="text-sm font-medium">
-                      {member.display_name}
-                      {member.user_id === group.me && ' (you)'}
-                      {member.role === 'owner' && ' ✨'}
-                    </span>
-                    {hasPay && <Receipt className="h-3 w-3 text-green-400" />}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Bills */}
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Bills in this group</h2>
-          <Link href="/create">
-            <Button size="sm" variant="outline">
-              <Plus className="h-4 w-4 mr-1" />
-              New bill
-            </Button>
-          </Link>
+            }
+          >
+            {group.bills.length === 0 ? (
+              <p className="text-sm leading-relaxed text-white/40">
+                No bills yet. Create a bill and pick this group in the details step.
+              </p>
+            ) : (
+              <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
+                {group.bills.map((bill) => (
+                  <BillRow
+                    key={bill.id}
+                    id={bill.id}
+                    name={bill.name}
+                    status={bill.status}
+                    createdAt={bill.created_at}
+                    peopleCount={bill.participants?.length || 0}
+                    total={billTotal(bill)}
+                  />
+                ))}
+              </div>
+            )}
+          </Section>
         </div>
 
-        {group.bills.length === 0 ? (
-          <Card className="shadow-sm">
-            <CardContent className="py-10 text-center text-muted-foreground">
-              <Receipt className="h-8 w-8 mx-auto mb-3 text-white/20" />
-              <p className="mb-1">No bills yet.</p>
-              <p className="text-sm">Create a bill and pick this group in the details step.</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4">
-            {group.bills.map((bill) => (
-              <Link key={bill.id} href={`/bill/${bill.id}`}>
-                <Card className="bg-white/5 border-white/10 backdrop-blur-sm hover:bg-white/10 transition-smooth cursor-pointer shadow-sm hover:shadow-md">
-                  <CardContent className="py-4">
-                    <div className="flex justify-between items-center">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold text-white">{bill.name}</h3>
-                          {bill.status === 'settled' ? (
-                            <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/20">
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
-                              Settled
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-400 border-amber-500/20">
-                              <Clock className="h-3 w-3 mr-1" />
-                              Active
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="text-sm text-white/40 mt-1">
-                          Code: <span className="font-mono">{bill.short_code}</span>
-                          <span className="ml-3">
-                            {bill.participants?.length || 0} people · {formatCurrency(billTotal(bill))}
-                          </span>
-                        </div>
-                      </div>
-                      <ChevronRight className="h-5 w-5 text-white/30" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
+        <InviteDialog
+          open={showInviteDialog}
+          onOpenChange={setShowInviteDialog}
+          groupName={group.name}
+          inviteUrl={inviteUrl}
+          onCopy={handleCopyInvite}
+          email={inviteEmail}
+          onEmailChange={setInviteEmail}
+          onSubmitEmail={handleEmailInvite}
+          isSending={isInviting}
+        />
+
+        <GroupDialog open={showRenameDialog} onOpenChange={setShowRenameDialog} title="Rename group">
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="groupName" className="text-sm font-medium text-white/70">
+                Name
+              </Label>
+              <Input
+                id="groupName"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleRename()}
+                className="border-white/10 bg-white/[0.03]"
+              />
+            </div>
+            <Button className="w-full" onClick={handleRename} disabled={isSaving}>
+              {isSaving && <Loader2 className="animate-spin" />}
+              Save
+            </Button>
           </div>
-        )}
+        </GroupDialog>
 
-        {/* Rename Dialog */}
-        <Dialog open={showRenameDialog} onOpenChange={setShowRenameDialog}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Edit group</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="groupName">Name</Label>
-                <Input
-                  id="groupName"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleRename()}
-                />
-              </div>
-              <Button className="w-full" onClick={handleRename} disabled={isSaving}>
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Save
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <ConfirmDialog
+          open={showDeleteDialog}
+          onOpenChange={setShowDeleteDialog}
+          title="Delete this group?"
+          description="The bills inside stay. They just won't be grouped anymore."
+          confirmLabel="Delete group"
+          onConfirm={handleDelete}
+          isPending={isDeleting}
+        />
 
-        {/* Delete Dialog */}
-        <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Delete this group?</DialogTitle>
-              <DialogDescription>
-                The bills inside stay — they just won&apos;t be grouped anymore.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex gap-3 pt-4">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setShowDeleteDialog(false)}
-                disabled={isDeleting}
-              >
-                Cancel
-              </Button>
-              <Button variant="destructive" className="flex-1" onClick={handleDelete} disabled={isDeleting}>
-                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Delete group
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Leave Dialog */}
-        <Dialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Leave this group?</DialogTitle>
-              <DialogDescription>
-                {myBalances.length > 0
-                  ? 'You still have unsettled balances here — consider settling up first. Your bill history stays either way.'
-                  : 'You can rejoin later with an invite link. Your bill history stays.'}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex gap-3 pt-4">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setShowLeaveDialog(false)}
-                disabled={isLeaving}
-              >
-                Cancel
-              </Button>
-              <Button variant="destructive" className="flex-1" onClick={handleLeave} disabled={isLeaving}>
-                {isLeaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Leave group
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <ConfirmDialog
+          open={showLeaveDialog}
+          onOpenChange={setShowLeaveDialog}
+          title="Leave this group?"
+          description={
+            myBalances.length > 0
+              ? 'You still have unsettled balances here. Consider settling up first; your bill history stays either way.'
+              : 'You can rejoin later with an invite link. Your bill history stays.'
+          }
+          confirmLabel="Leave group"
+          onConfirm={handleLeave}
+          isPending={isLeaving}
+        />
       </div>
     </main>
   );
