@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { requireBillOwnership, publicBill } from '@/lib/auth-helpers';
+import { requireBillOwnership, publicBill, PARTICIPANT_COLUMNS } from '@/lib/auth-helpers';
 import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
 import { parseZelleInput, ZELLE_INPUT_ERROR } from '@/lib/payment-links';
 import { signZelleQr } from '@/lib/zelle-server';
@@ -44,7 +44,7 @@ export async function GET(
     // Get participants
     const { data: participants } = await db
       .from('participants')
-      .select('*')
+      .select(PARTICIPANT_COLUMNS)
       .eq('bill_id', bill.id)
       .order('created_at', { ascending: true });
 

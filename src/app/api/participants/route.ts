@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { requireBillOwnership } from '@/lib/auth-helpers';
+import {
+  requireBillOwnership,
+  canActAsParticipant,
+  issueParticipantToken,
+  PARTICIPANT_COLUMNS,
+} from '@/lib/auth-helpers';
 import { cleanText, LIMITS } from '@/lib/validate';
 
 export async function PATCH(request: NextRequest) {
@@ -24,9 +29,9 @@ export async function PATCH(request: NextRequest) {
 
     const { data: participant } = await db
       .from('participants')
-      .select('id, bill_id')
+      .select('id, bill_id, user_id, participant_token_hash')
       .eq('id', participant_id)
-      .single();
+      .maybeSingle();
 
     if (!participant) {
       return NextResponse.json({ error: 'Participant not found' }, { status: 404 });
@@ -37,6 +42,12 @@ export async function PATCH(request: NextRequest) {
     if (payment_status !== undefined) {
       if (!['unpaid', 'paid'].includes(payment_status)) {
         return NextResponse.json({ error: 'Invalid payment_status' }, { status: 400 });
+      }
+      if (!(await canActAsParticipant(request, participant, supabase))) {
+        return NextResponse.json(
+          { error: 'Only this person or the bill creator can change their payment status' },
+          { status: 403 }
+        );
       }
       updateData.payment_status = payment_status;
       updateData.paid_at = payment_status === 'paid' ? new Date().toISOString() : null;
@@ -51,7 +62,15 @@ export async function PATCH(request: NextRequest) {
           { status: 403 }
         );
       }
-      updateData.custom_amount = custom_amount === null ? null : Number(custom_amount) || 0;
+      if (custom_amount === null) {
+        updateData.custom_amount = null;
+      } else {
+        const amount = typeof custom_amount === 'number' ? custom_amount : Number.NaN;
+        if (!Number.isFinite(amount) || amount < 0 || amount > LIMITS.maxPrice) {
+          return NextResponse.json({ error: 'Invalid custom amount' }, { status: 400 });
+        }
+        updateData.custom_amount = Math.round(amount * 100) / 100;
+      }
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -62,7 +81,7 @@ export async function PATCH(request: NextRequest) {
       .from('participants')
       .update(updateData)
       .eq('id', participant_id)
-      .select()
+      .select(PARTICIPANT_COLUMNS)
       .single();
 
     if (error) {
@@ -124,7 +143,7 @@ export async function POST(request: NextRequest) {
     if (user) {
       const { data: mine } = await db
         .from('participants')
-        .select('*')
+        .select(PARTICIPANT_COLUMNS)
         .eq('bill_id', bill_id)
         .eq('user_id', user.id)
         .maybeSingle();
@@ -195,16 +214,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Create new participant (linked to their account when signed in, so
-    // group balances can track them across bills)
+    // group balances can track them across bills). The participant token is
+    // returned once; only its hash is stored.
+    const { token: participant_token, hash } = issueParticipantToken();
     const { data: participant, error } = await db
       .from('participants')
       .insert({
         bill_id,
         name: finalName,
         is_creator: false,
+        participant_token_hash: hash,
         ...(user ? { user_id: user.id } : {}),
       })
-      .select()
+      .select(PARTICIPANT_COLUMNS)
       .single();
 
     if (error) {
@@ -215,7 +237,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(participant);
+    return NextResponse.json({ ...participant, participant_token });
   } catch (error) {
     console.error('Error in participants POST:', error);
     return NextResponse.json(

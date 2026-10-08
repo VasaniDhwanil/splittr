@@ -235,9 +235,10 @@ export default function BillPage() {
         body: JSON.stringify({ bill_id: bill.id }),
       });
       if (!res.ok) return null;
-      const participant: Participant = await res.json();
+      const participant: Participant & { participant_token?: string } = await res.json();
       setCurrentParticipant(participant);
       localStorage.setItem(`splittr-participant-${bill.id}`, participant.id);
+      rememberParticipantToken(participant);
       toast.success(`Welcome, ${participant.name}!`);
       return participant;
     } catch {
@@ -251,6 +252,16 @@ export default function BillPage() {
   const creatorHeaders = (): Record<string, string> => ({
     'Content-Type': 'application/json',
     'X-Creator-Token': bill ? localStorage.getItem(`splittr-creator-token-${bill.id}`) || '' : '',
+  });
+
+  // Each participant's secret proves "this is me" when marking paid. It's
+  // returned once at join and kept per participant id.
+  const rememberParticipantToken = (p: { id: string; participant_token?: string }) => {
+    if (p.participant_token) localStorage.setItem(`splittr-participant-token-${p.id}`, p.participant_token);
+  };
+  const participantHeaders = (participantId: string): Record<string, string> => ({
+    ...creatorHeaders(),
+    'X-Participant-Token': localStorage.getItem(`splittr-participant-token-${participantId}`) || '',
   });
 
   /** Re-attach to an existing participant (same person, another device). */
@@ -296,6 +307,7 @@ export default function BillPage() {
       const participant = await response.json();
       setCurrentParticipant(participant);
       localStorage.setItem(`splittr-participant-${bill.id}`, participant.id);
+      rememberParticipantToken(participant);
 
       // Save to "My Bills" for participants too
       const storedBills = JSON.parse(localStorage.getItem('splittr-my-bills') || '[]');
@@ -494,9 +506,13 @@ export default function BillPage() {
     try {
       const response = await fetch('/api/participants', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: participantHeaders(participant.id),
         body: JSON.stringify({ participant_id: participant.id, payment_status: newStatus }),
       });
+      if (response.status === 403) {
+        toast.error('Only this person or the host can change that. Ask the host to mark it.');
+        return;
+      }
       if (!response.ok) throw new Error('Failed to update payment status');
       toast.success(
         newStatus === 'paid'
