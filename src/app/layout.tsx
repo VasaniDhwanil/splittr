@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { AnimatedBackground } from "@/components/ui/animated-background";
 import { ScrollReset } from "@/components/scroll-reset";
+import { JsonLd } from "@/components/seo/json-ld";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,8 +17,37 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Splittr - Split Bills with Friends",
-  description: "Scan receipts, share with friends, and split bills fairly.",
+  metadataBase: new URL("https://www.splittr.cash"),
+  title: {
+    default: "Splittr: split the bill by what you ordered",
+    template: "%s · Splittr",
+  },
+  description:
+    "Scan a restaurant receipt, share a link, and everyone taps what they ordered. Tax and tip split fairly. Free, no app to install.",
+  keywords: [
+    "split bill",
+    "receipt scanner",
+    "split restaurant bill",
+    "bill splitting app",
+    "Venmo split",
+  ],
+  alternates: { canonical: "/" },
+  robots: { index: true, follow: true },
+  openGraph: {
+    type: "website",
+    siteName: "Splittr",
+    url: "/",
+    title: "Splittr: split the bill by what you ordered",
+    description:
+      "Scan a restaurant receipt, share a link, and everyone taps what they ordered. Tax and tip split fairly.",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Splittr: split the bill by what you ordered",
+    description:
+      "Scan a restaurant receipt, share a link, and everyone taps what they ordered. Tax and tip split fairly.",
+  },
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -29,8 +59,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   themeColor: "#000000",
 };
 
@@ -51,6 +79,7 @@ export default function RootLayout({
         <div id="app-scroll" className="relative z-10 h-dvh overflow-y-auto overscroll-y-contain">
           {children}
         </div>
+        <JsonLd />
         <ScrollReset />
         <Toaster />
       </body>

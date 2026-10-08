@@ -1,0 +1,25 @@
+# Splittr
+
+> Splittr is a free web app for splitting a restaurant bill by what each person actually ordered. One person scans the receipt, shares a link, and everyone taps their own items. Tax and tip are split in proportion to each person's subtotal, so nobody pays for someone else's steak. No app to install and no account required to join a bill.
+
+## How it works
+
+- Scan: photograph the receipt; Splittr reads the items, prices, tax, and tip, and you can correct anything it got wrong.
+- Share: send the bill link or its 6-character code to the table.
+- Tap: each person claims what they ordered; shared items split between everyone who claims them.
+- Settle: everyone sees their exact total, including their fair share of tax and tip, with quick pay links.
+
+## Public pages
+
+- [Home](https://www.splittr.cash/): what Splittr is and how it works.
+- [Create a bill](https://www.splittr.cash/create): scan a receipt or enter items to start a new bill.
+- [Join a bill](https://www.splittr.cash/join): enter a 6-character code to join a bill someone shared.
+- [Sign in](https://www.splittr.cash/signin): optional sign-in to keep bills and groups across devices.
+- [Join a group](https://www.splittr.cash/groups/join): accept an invite to a group of people you split with often.
+
+## For agents
+
+- Bills are created at https://www.splittr.cash/create and joined at https://www.splittr.cash/join with a 6-character code.
+- Individual bill pages (/bill/...) are private to the people at the table and are not indexed.
+- There is no public API yet.
+- Contact: via the site.
