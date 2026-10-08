@@ -4,16 +4,17 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { ArrowLeft, Loader2, Users } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
+import { Reveal } from '@/components/groups/reveal';
 
 export default function JoinPage() {
   const router = useRouter();
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [notFound, setNotFound] = useState(false);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,6 +25,7 @@ export default function JoinPage() {
     }
 
     setIsLoading(true);
+    setNotFound(false);
 
     try {
       // Look up the bill by code
@@ -31,7 +33,7 @@ export default function JoinPage() {
 
       if (!response.ok) {
         if (response.status === 404) {
-          toast.error("Hmm, can't find that bill. Double-check the code?");
+          setNotFound(true);
         } else {
           toast.error('Something went wrong. Please try again.');
         }
@@ -49,50 +51,62 @@ export default function JoinPage() {
   };
 
   return (
-    <main className="min-h-dvh py-8">
-      <div className="container mx-auto px-4 max-w-md">
-        <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Home
+    <main className="min-h-dvh flex flex-col items-center justify-center px-4 py-16">
+      <div className="w-full max-w-sm">
+        <Link
+          href="/"
+          className="mb-8 inline-flex h-11 items-center gap-2 text-sm text-white/40 transition-colors hover:text-white"
+        >
+          <ArrowLeft className="size-4" />
+          Back to home
         </Link>
 
-        <Card className="shadow-sm bg-white/5 border-white/10 backdrop-blur-sm">
-          <CardHeader className="text-center">
-            <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Users className="h-8 w-8 text-emerald-300" />
-            </div>
-            <CardTitle className="text-2xl text-white">Join a <span className="bg-gradient-to-r from-emerald-300 to-green-400 bg-clip-text text-transparent">Bill</span></CardTitle>
-            <CardDescription>
-              Got a code from a friend? Enter it below to join their split.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleJoin} className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="code">Bill Code</Label>
-                <Input
-                  id="code"
-                  placeholder="ABC123"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  maxLength={6}
-                  className="text-center text-3xl font-mono tracking-[0.5em] uppercase h-16 bg-muted/50"
-                />
-              </div>
+        <Reveal>
+          <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Join a bill</h1>
+          <p className="mt-2 text-sm leading-relaxed text-white/40">
+            Enter the code a friend shared to join their split.
+          </p>
 
-              <Button type="submit" className="w-full transition-smooth hover:scale-105" size="lg" disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Finding Bill...
-                  </>
-                ) : (
-                  "Find My Bill"
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+          <form onSubmit={handleJoin} className="mt-10 space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="code" className="text-sm font-medium text-white/70">
+                Bill code
+              </Label>
+              <Input
+                id="code"
+                placeholder="ABC123"
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value.toUpperCase());
+                  if (notFound) setNotFound(false);
+                }}
+                maxLength={6}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                aria-invalid={notFound || undefined}
+                aria-describedby={notFound ? 'code-error' : undefined}
+                className="h-16 border-white/10 bg-white/[0.03] text-center font-mono text-3xl uppercase tracking-widest text-white placeholder:text-white/20 md:text-3xl"
+              />
+              {notFound && (
+                <p id="code-error" role="alert" className="text-sm text-red-300/90">
+                  Hmm, can&apos;t find that bill. Double-check the code?
+                </p>
+              )}
+            </div>
+
+            <Button type="submit" size="lg" className="w-full" disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <Loader2 className="animate-spin" />
+                  Finding bill...
+                </>
+              ) : (
+                'Join'
+              )}
+            </Button>
+          </form>
+        </Reveal>
       </div>
     </main>
   );
