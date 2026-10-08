@@ -93,6 +93,8 @@ test.describe('bill realtime (writes)', () => {
     // Guest context mirrors the project's device emulation, without a session
     const { viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } = testInfo.project.use;
     const guestContext = await browser.newContext({
+      // Explicitly empty: the guest must never inherit the host session
+      storageState: { cookies: [], origins: [] },
       baseURL: BASE_URL,
       viewport,
       userAgent,
@@ -120,33 +122,25 @@ test.describe('bill realtime (writes)', () => {
       const participantKey = `splittr-participant-${b.id}`;
       let participantId = '';
       await test.step('guest joins as "Probe Guest"', async () => {
-        try {
-          await guestPage.getByRole('button', { name: 'Join the fun' }).click({ timeout: 10_000 });
-          const dialog = guestPage.getByRole('dialog');
-          await dialog.getByLabel(/your name/i).fill(GUEST, { timeout: 10_000 });
-          await dialog.getByRole('button', { name: /let.s go/i }).click({ timeout: 10_000 });
-          await expect
-            .poll(() => guestPage.evaluate((k) => localStorage.getItem(k), participantKey), { timeout: 10_000 })
-            .toBeTruthy();
-        } catch {
-          // UI fallback: join through the API from inside B, then reload B
-          // (B reloading is fine; only A's no-reload property is under test)
-          testInfo.annotations.push({ type: 'note', description: 'join dialog unavailable; joined via API' });
-          const joined = await guestPage.evaluate(
-            async ({ billId, name }) => {
-              const r = await fetch('/api/participants', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ bill_id: billId, name }),
-              });
-              return { status: r.status, body: await r.json() };
-            },
-            { billId: b.id, name: GUEST }
-          );
-          expect(joined.status, 'POST /api/participants').toBe(200);
-          await guestPage.evaluate(([k, v]) => localStorage.setItem(k, v), [participantKey, joined.body.id]);
-          await guestPage.reload();
-        }
+        // Join through the API from inside B so B owns the participant identity.
+        // (Driving the join dialog here once produced a second "Probe Guest (2)"
+        // when the dialog and the fallback both joined; the name must be exact
+        // because the host-side assertion looks for it.)
+        const joined = await guestPage.evaluate(
+          async ({ billId, name }) => {
+            const r = await fetch('/api/participants', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ bill_id: billId, name }),
+            });
+            return { status: r.status, body: (await r.json()) as { id?: string; name?: string } };
+          },
+          { billId: b.id, name: GUEST }
+        );
+        expect(joined.status, 'POST /api/participants').toBe(200);
+        expect(joined.body.name, 'guest joined under the exact name').toBe(GUEST);
+        await guestPage.evaluate(([k, v]) => localStorage.setItem(k, v), [participantKey, joined.body.id ?? '']);
+        await guestPage.reload();
         participantId = (await guestPage.evaluate((k) => localStorage.getItem(k), participantKey)) ?? '';
         expect(participantId).not.toBe('');
       });
