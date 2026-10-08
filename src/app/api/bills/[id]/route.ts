@@ -5,14 +5,25 @@ import { requireBillOwnership, publicBill, PARTICIPANT_COLUMNS } from '@/lib/aut
 import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
 import { parseZelleInput, ZELLE_INPUT_ERROR } from '@/lib/payment-links';
 import { signZelleQr } from '@/lib/zelle-server';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // A bill's id / share code is its access key: throttle guessing. Generous
+    // enough for a table of friends behind one NAT, each refetching on every
+    // realtime change.
+    const limit = rateLimit(`bill-get:${clientIp(request)}`, 300, 60 * 1000);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } }
+      );
+    }
+
     const { id } = await params;
-    const supabase = await createClient(); // auth (cookies) only
     const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     // Check if id is a short_code or UUID

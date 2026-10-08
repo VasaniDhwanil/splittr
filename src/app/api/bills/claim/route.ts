@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { LIMITS } from '@/lib/validate';
 
 interface ClaimEntry {
   bill_id: string;
@@ -33,11 +34,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (claims.length > LIMITS.maxClaimBatch) {
+      return NextResponse.json({ error: 'Too many bills in one request' }, { status: 400 });
+    }
+
     let claimed = 0;
     const failed: string[] = [];
 
     for (const claim of claims) {
-      const { bill_id, creator_token } = claim;
+      const { bill_id, creator_token } = claim ?? {};
+      if (typeof bill_id !== 'string' || typeof creator_token !== 'string' || !creator_token) {
+        failed.push(String(bill_id));
+        continue;
+      }
 
       // Only claim if token matches and bill is not already owned
       const { data, error } = await db

@@ -1,11 +1,15 @@
 import { Bill, BillItem, Participant, ItemClaim, ParticipantSplit } from '@/types';
 
+/**
+ * Share codes double as access to a bill (and invite codes to a group), so
+ * they come from the CSPRNG. 32 symbols divide 256 evenly, so byte % 32 is
+ * unbiased.
+ */
 export function generateShortCode(length = 6): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing chars (0,O,1,I)
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
   let code = '';
-  for (let i = 0; i < length; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
+  for (const byte of bytes) code += chars[byte % chars.length];
   return code;
 }
 

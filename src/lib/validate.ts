@@ -12,6 +12,9 @@ export const LIMITS = {
   maxTipPercent: 100,
   maxParticipants: 50,
   maxShare: 99,
+  groupName: 60,
+  groupEmoji: 16,
+  maxClaimBatch: 50,
 };
 
 export function cleanText(raw: unknown, maxLength: number): string {

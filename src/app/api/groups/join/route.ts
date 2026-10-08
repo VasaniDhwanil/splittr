@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { rateLimit } from '@/lib/rate-limit';
+
+/** Invite codes grant group access: cap lookups per account to stop guessing. */
+function throttled(userId: string) {
+  const limit = rateLimit(`group-join:${userId}`, 20, 10 * 60 * 1000);
+  return limit.allowed
+    ? null
+    : NextResponse.json(
+        { error: 'Too many attempts. Try again in a few minutes.' },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } }
+      );
+}
 
 // Preview a group by invite code (so the join page can show what you're joining)
 export async function GET(request: NextRequest) {
@@ -14,6 +26,8 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const blocked = throttled(user.id);
+    if (blocked) return blocked;
 
     const code = new URL(request.url).searchParams.get('code')?.trim().toUpperCase();
     if (!code) {
@@ -60,6 +74,8 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'Sign in to join groups' }, { status: 401 });
     }
+    const blocked = throttled(user.id);
+    if (blocked) return blocked;
 
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {

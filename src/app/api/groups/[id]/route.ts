@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { publicBill, PARTICIPANT_COLUMNS } from '@/lib/auth-helpers';
+import { cleanText, LIMITS } from '@/lib/validate';
 
 async function requireGroupAccess(groupId: string, supabase: SupabaseClient) {
   const db = createAdminClient();
@@ -127,8 +128,10 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
     const updateData: Record<string, unknown> = {};
-    if (typeof body.name === 'string' && body.name.trim()) updateData.name = body.name.trim();
-    if (typeof body.emoji === 'string' && body.emoji.trim()) updateData.emoji = body.emoji.trim();
+    const name = typeof body.name === 'string' ? cleanText(body.name, LIMITS.groupName) : '';
+    const emoji = typeof body.emoji === 'string' ? cleanText(body.emoji, LIMITS.groupEmoji + 1) : '';
+    if (name) updateData.name = name;
+    if (emoji && emoji.length <= LIMITS.groupEmoji) updateData.emoji = emoji;
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });

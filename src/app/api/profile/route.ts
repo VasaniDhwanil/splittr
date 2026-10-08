@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { parseZelleInput, ZELLE_INPUT_ERROR } from '@/lib/payment-links';
 import { presentProfile } from '@/lib/zelle-server';
+import { cleanText, LIMITS } from '@/lib/validate';
 
 export async function GET() {
   try {
@@ -60,8 +61,19 @@ export async function PUT(request: NextRequest) {
     }
     const { display_name, venmo_handle, cashapp_handle, paypal_handle, zelle_handle } = body;
 
-    if (display_name !== undefined && (typeof display_name !== 'string' || !display_name.trim())) {
+    const displayName = display_name === undefined ? undefined : cleanText(display_name, LIMITS.personName);
+    if (display_name !== undefined && (typeof display_name !== 'string' || !displayName)) {
       return NextResponse.json({ error: 'Display name cannot be empty' }, { status: 400 });
+    }
+
+    // Handles: omitted = unchanged, null/blank = cleared, else a bounded string
+    const handles: Record<string, string | null> = {};
+    for (const [key, raw] of Object.entries({ venmo_handle, cashapp_handle, paypal_handle })) {
+      if (raw === undefined) continue;
+      if (raw !== null && typeof raw !== 'string') {
+        return NextResponse.json({ error: `Invalid ${key}` }, { status: 400 });
+      }
+      handles[key] = cleanText(raw, LIMITS.handle) || null;
     }
 
     const zelle = parseZelleInput(zelle_handle);
@@ -74,10 +86,8 @@ export async function PUT(request: NextRequest) {
       .upsert(
         {
           user_id: user.id,
-          ...(display_name !== undefined ? { display_name: display_name.trim() } : {}),
-          ...(venmo_handle !== undefined ? { venmo_handle: venmo_handle?.trim() || null } : {}),
-          ...(cashapp_handle !== undefined ? { cashapp_handle: cashapp_handle?.trim() || null } : {}),
-          ...(paypal_handle !== undefined ? { paypal_handle: paypal_handle?.trim() || null } : {}),
+          ...(displayName !== undefined ? { display_name: displayName } : {}),
+          ...handles,
           ...(zelle.value !== undefined ? { zelle_handle: zelle.value } : {}),
           updated_at: new Date().toISOString(),
         },
@@ -92,10 +102,10 @@ export async function PUT(request: NextRequest) {
     }
 
     // Keep group member display names in sync with the profile
-    if (display_name !== undefined) {
+    if (displayName !== undefined) {
       await db
         .from('group_members')
-        .update({ display_name: display_name.trim() })
+        .update({ display_name: displayName })
         .eq('user_id', user.id);
     }
 
