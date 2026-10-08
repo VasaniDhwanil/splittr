@@ -11,7 +11,7 @@ import { ArrowLeft, Check, Loader2, Plus } from 'lucide-react';
 import { formatCurrency, billTotal } from '@/lib/calculations';
 import { computeGroupLedger, netBalancesFor, NetBalance } from '@/lib/balances';
 import type { BillDetail } from '@/lib/balances';
-import { getPaymentOptions } from '@/lib/payment-links';
+import { getPaymentOptions, billHasPaymentMethods, getZelleInfo } from '@/lib/payment-links';
 import { Group, GroupMember, BillWithParticipants } from '@/types';
 import { Reveal } from '@/components/groups/reveal';
 import { Section } from '@/components/groups/section';
@@ -334,6 +334,7 @@ export default function GroupPage() {
                       balance.amount > 0 && member?.profile
                         ? getPaymentOptions(member.profile, balance.amount, `Splittr: ${group.name}`)
                         : [];
+                    const zelle = balance.amount > 0 && member?.profile ? getZelleInfo(member.profile) : null;
                     return (
                       <BalanceRow
                         key={person.key}
@@ -341,6 +342,7 @@ export default function GroupPage() {
                         isGuest={!person.user_id}
                         amount={balance.amount}
                         payOptions={payOptions}
+                        zelle={zelle}
                         isSettling={settlingKey === person.key}
                         onSettle={() => handleSettle(balance)}
                       />
@@ -370,9 +372,7 @@ export default function GroupPage() {
                 name: member.display_name,
                 isYou: member.user_id === group.me,
                 isOwner: member.role === 'owner',
-                hasPaymentHandles: Boolean(
-                  member.profile?.venmo_handle || member.profile?.cashapp_handle || member.profile?.paypal_handle
-                ),
+                hasPaymentHandles: Boolean(member.profile && billHasPaymentMethods(member.profile)),
               }))}
             />
           </Section>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { ArrowLeft, Loader2, Wallet, User } from 'lucide-react';
+import { ArrowLeft, Loader2, Wallet, User, QrCode, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { AvatarInitials } from '@/components/avatar-initials';
 
@@ -21,6 +21,10 @@ export default function ProfilePage() {
   const [venmo, setVenmo] = useState('');
   const [cashapp, setCashapp] = useState('');
   const [paypal, setPaypal] = useState('');
+  const [zelle, setZelle] = useState('');
+  const [zelleQrUrl, setZelleQrUrl] = useState<string | null>(null);
+  const [isUploadingQr, setIsUploadingQr] = useState(false);
+  const qrInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -39,6 +43,8 @@ export default function ProfilePage() {
         setVenmo(profile.venmo_handle || '');
         setCashapp(profile.cashapp_handle || '');
         setPaypal(profile.paypal_handle || '');
+        setZelle(profile.zelle_handle || '');
+        setZelleQrUrl(profile.zelle_qr_url || null);
       }
       setIsLoading(false);
     };
@@ -60,14 +66,50 @@ export default function ProfilePage() {
           venmo_handle: venmo,
           cashapp_handle: cashapp,
           paypal_handle: paypal,
+          zelle_handle: zelle,
         }),
       });
-      if (!res.ok) throw new Error('Failed to save');
+      const saved = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(saved.error || 'Failed to save profile');
+      setZelle(saved.zelle_handle || '');
       toast.success('Profile saved!');
-    } catch {
-      toast.error('Failed to save profile');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save profile');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleQrSelected = async (file: File | undefined) => {
+    if (!file) return;
+    setIsUploadingQr(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/profile/zelle-qr', { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      setZelleQrUrl(data.zelle_qr_url);
+      toast.success('Zelle QR saved');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Upload failed');
+    } finally {
+      setIsUploadingQr(false);
+      if (qrInputRef.current) qrInputRef.current.value = '';
+    }
+  };
+
+  const handleQrRemove = async () => {
+    setIsUploadingQr(true);
+    try {
+      const res = await fetch('/api/profile/zelle-qr', { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      setZelleQrUrl(null);
+      toast.success('Zelle QR removed');
+    } catch {
+      toast.error('Failed to remove QR');
+    } finally {
+      setIsUploadingQr(false);
     }
   };
 
@@ -141,6 +183,67 @@ export default function ProfilePage() {
             <div className="space-y-2">
               <Label htmlFor="paypal">PayPal.Me</Label>
               <Input id="paypal" placeholder="yourpaypalme" value={paypal} onChange={(e) => setPaypal(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="zelle">Zelle</Label>
+              <Input
+                id="zelle"
+                placeholder="Email or US phone number"
+                value={zelle}
+                onChange={(e) => setZelle(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Zelle QR code</Label>
+              <p className="text-xs text-muted-foreground">
+                In your bank app, open Zelle and find &ldquo;My QR code&rdquo;. Screenshot it and upload it here so
+                friends at the table can scan it.
+              </p>
+              <input
+                ref={qrInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => handleQrSelected(e.target.files?.[0])}
+              />
+              {zelleQrUrl ? (
+                <div className="flex items-center gap-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL */}
+                  <img
+                    src={zelleQrUrl}
+                    alt="Your Zelle QR code"
+                    className="w-24 h-24 rounded-lg bg-white object-contain"
+                  />
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => qrInputRef.current?.click()}
+                      disabled={isUploadingQr}
+                    >
+                      {isUploadingQr ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Replace'}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={handleQrRemove} disabled={isUploadingQr}>
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => qrInputRef.current?.click()}
+                  disabled={isUploadingQr}
+                >
+                  {isUploadingQr ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <QrCode className="h-4 w-4 mr-2" />
+                  )}
+                  Upload Zelle QR screenshot
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>

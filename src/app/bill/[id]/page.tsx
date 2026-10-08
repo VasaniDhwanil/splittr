@@ -37,7 +37,8 @@ import {
   SearchX,
 } from 'lucide-react';
 import { formatCurrency, calculateSplits, billTotal, formatShare, formatQuantity } from '@/lib/calculations';
-import { getPaymentOptions, billHasPaymentMethods } from '@/lib/payment-links';
+import { getPaymentOptions, billHasPaymentMethods, getZelleInfo } from '@/lib/payment-links';
+import { onPayLinkClick, ZellePanel } from '@/components/pay-links';
 import { Bill, BillItem, Participant, ItemClaim, ParticipantSplit, SplitMode, TipSplit } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 import { AvatarInitials, AvatarStack, getPersonHex } from '@/components/avatar-initials';
@@ -109,6 +110,7 @@ export default function BillPage() {
   const [editVenmo, setEditVenmo] = useState('');
   const [editCashapp, setEditCashapp] = useState('');
   const [editPaypal, setEditPaypal] = useState('');
+  const [editZelle, setEditZelle] = useState('');
   const [editPaidBy, setEditPaidBy] = useState<string | null>(null); // null = creator paid
 
   // Payments
@@ -547,6 +549,7 @@ export default function BillPage() {
     setEditVenmo(bill.venmo_handle || '');
     setEditCashapp(bill.cashapp_handle || '');
     setEditPaypal(bill.paypal_handle || '');
+    setEditZelle(bill.zelle_handle || '');
     setEditPaidBy(bill.paid_by_user_id ?? null);
     setShowEditDialog(true);
   };
@@ -579,6 +582,7 @@ export default function BillPage() {
           venmo_handle: editVenmo,
           cashapp_handle: editCashapp,
           paypal_handle: editPaypal,
+          zelle_handle: editZelle,
           ...(bill.group_id ? { paid_by_user_id: editPaidBy } : {}),
         }),
       });
@@ -587,14 +591,17 @@ export default function BillPage() {
         toast.error('Only the bill creator can edit this');
         return;
       }
-      if (!response.ok) throw new Error('Failed to save changes');
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to save changes');
+      }
 
       setShowEditDialog(false);
       toast.success('Bill updated!');
       await fetchBill();
     } catch (error) {
       console.error('Error saving edit:', error);
-      toast.error('Failed to save changes');
+      toast.error(error instanceof Error ? error.message : 'Failed to save changes');
     } finally {
       setIsSavingEdit(false);
     }
@@ -720,14 +727,10 @@ export default function BillPage() {
   const iAmPaid = currentParticipant?.payment_status === 'paid';
   // Deep links point at the payer's handles (their profile) when someone
   // other than the creator paid; otherwise the bill's own handles.
-  const paySource =
-    bill.paid_by && (bill.paid_by.venmo_handle || bill.paid_by.cashapp_handle || bill.paid_by.paypal_handle)
-      ? bill.paid_by
-      : bill;
-  const myPaymentOptions =
-    currentParticipant && !iAmPayer && myShare && billHasPaymentMethods(paySource)
-      ? getPaymentOptions(paySource, myShare.total, `Splittr: ${bill.name}`)
-      : [];
+  const paySource = bill.paid_by && billHasPaymentMethods(bill.paid_by) ? bill.paid_by : bill;
+  const canPay = Boolean(currentParticipant && !iAmPayer && myShare && billHasPaymentMethods(paySource));
+  const myPaymentOptions = canPay ? getPaymentOptions(paySource, myShare!.total, `Splittr: ${bill.name}`) : [];
+  const myZelle = canPay ? getZelleInfo(paySource) : null;
 
   // Custom mode: how much of the bill is assigned so far
   const assignedTotal = participants.reduce((sum, p) => sum + (p.custom_amount ?? 0), 0);
@@ -1202,7 +1205,7 @@ export default function BillPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {!iAmPaid && myPaymentOptions.length > 0 && (
+              {!iAmPaid && (myPaymentOptions.length > 0 || myZelle) && (
                 <div className="grid gap-2">
                   {myPaymentOptions.map((option) => (
                     <a
@@ -1210,6 +1213,7 @@ export default function BillPage() {
                       href={option.url}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={onPayLinkClick(option)}
                       className="flex items-center justify-between px-4 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-smooth"
                     >
                       <span className="flex items-center gap-3">
@@ -1230,9 +1234,10 @@ export default function BillPage() {
                       </span>
                     </a>
                   ))}
+                  {myZelle && <ZellePanel zelle={myZelle} amount={myShare.total} />}
                 </div>
               )}
-              {!iAmPaid && myPaymentOptions.length === 0 && (
+              {!iAmPaid && myPaymentOptions.length === 0 && !myZelle && (
                 <p className="text-sm text-muted-foreground">
                   Pay {payerDisplayName} however you usually do, then mark yourself paid.
                 </p>
@@ -1656,6 +1661,11 @@ export default function BillPage() {
                   placeholder="PayPal.Me — yourpaypalme"
                   value={editPaypal}
                   onChange={(e) => setEditPaypal(e.target.value)}
+                />
+                <Input
+                  placeholder="Zelle — email or US phone"
+                  value={editZelle}
+                  onChange={(e) => setEditZelle(e.target.value)}
                 />
               </div>
 

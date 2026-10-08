@@ -4,7 +4,8 @@ import { ArrowUpRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AvatarInitials } from '@/components/avatar-initials';
 import { formatCurrency } from '@/lib/calculations';
-import type { PaymentOption } from '@/lib/payment-links';
+import type { PaymentOption, ZelleInfo } from '@/lib/payment-links';
+import { onPayLinkClick, ZelleChip } from '@/components/pay-links';
 
 interface BalanceRowProps {
   name: string;
@@ -13,11 +14,12 @@ interface BalanceRowProps {
   /** Positive: you owe them. Negative: they owe you. */
   amount: number;
   payOptions: PaymentOption[];
+  zelle?: ZelleInfo | null;
   isSettling: boolean;
   onSettle: () => void;
 }
 
-export function BalanceRow({ name, isGuest, amount, payOptions, isSettling, onSettle }: BalanceRowProps) {
+export function BalanceRow({ name, isGuest, amount, payOptions, zelle, isSettling, onSettle }: BalanceRowProps) {
   const iOwe = amount > 0;
 
   return (
@@ -35,7 +37,7 @@ export function BalanceRow({ name, isGuest, amount, payOptions, isSettling, onSe
         </span>
       </div>
 
-      {iOwe && payOptions.length === 0 && (
+      {iOwe && payOptions.length === 0 && !zelle?.copyValue && (
         <p className="mt-2 text-xs leading-relaxed text-white/40 sm:pl-11">
           {name} hasn&apos;t added payment handles. Pay however you usually do, then settle up.
         </p>
@@ -49,6 +51,7 @@ export function BalanceRow({ name, isGuest, amount, payOptions, isSettling, onSe
               href={option.url}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={onPayLinkClick(option)}
               title={`${option.label} ${option.handle}`}
               aria-label={`Pay ${name} ${formatCurrency(amount)} with ${option.label} (${option.handle})`}
               className="inline-flex h-9 items-center gap-1 rounded-full border border-white/10 px-3.5 text-xs font-medium text-white/70 transition-colors hover:border-white/20 hover:bg-white/[0.04] hover:text-white"
@@ -57,6 +60,7 @@ export function BalanceRow({ name, isGuest, amount, payOptions, isSettling, onSe
               <ArrowUpRight className="size-3 text-white/35" />
             </a>
           ))}
+        {iOwe && zelle && <ZelleChip zelle={zelle} amount={amount} name={name} />}
         <Button
           variant={iOwe ? 'secondary' : 'ghost'}
           size="sm"

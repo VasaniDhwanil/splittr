@@ -563,7 +563,7 @@ export default function Home() {
             <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
               <h3 className="font-semibold mb-2 text-lg text-white flex items-center justify-center gap-2"><Wallet className="h-5 w-5 text-green-400" />Settle Up Fast</h3>
               <p className="text-white/40">
-                One-tap Venmo, Cash App, and PayPal links for each share.
+                One-tap Venmo, Cash App, and PayPal links for each share, plus Zelle.
               </p>
             </div>
             <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">

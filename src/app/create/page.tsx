@@ -52,6 +52,7 @@ export default function CreatePage() {
   const [venmoHandle, setVenmoHandle] = useState('');
   const [cashappHandle, setCashappHandle] = useState('');
   const [paypalHandle, setPaypalHandle] = useState('');
+  const [zelleHandle, setZelleHandle] = useState('');
   const [showPayment, setShowPayment] = useState(false);
 
   const [groups, setGroups] = useState<GroupOption[]>([]);
@@ -72,7 +73,8 @@ export default function CreatePage() {
       if (saved.venmo) setVenmoHandle(saved.venmo);
       if (saved.cashapp) setCashappHandle(saved.cashapp);
       if (saved.paypal) setPaypalHandle(saved.paypal);
-      if (saved.venmo || saved.cashapp || saved.paypal) setShowPayment(true);
+      if (saved.zelle) setZelleHandle(saved.zelle);
+      if (saved.venmo || saved.cashapp || saved.paypal || saved.zelle) setShowPayment(true);
     } catch {
       // ignore bad localStorage
     }
@@ -96,7 +98,8 @@ export default function CreatePage() {
         if (profile.venmo_handle) setVenmoHandle(profile.venmo_handle);
         if (profile.cashapp_handle) setCashappHandle(profile.cashapp_handle);
         if (profile.paypal_handle) setPaypalHandle(profile.paypal_handle);
-        if (profile.venmo_handle || profile.cashapp_handle || profile.paypal_handle) {
+        if (profile.zelle_handle) setZelleHandle(profile.zelle_handle);
+        if (profile.venmo_handle || profile.cashapp_handle || profile.paypal_handle || profile.zelle_handle) {
           setShowPayment(true);
         }
       }
@@ -224,13 +227,15 @@ export default function CreatePage() {
           venmo_handle: venmoHandle,
           cashapp_handle: cashappHandle,
           paypal_handle: paypalHandle,
+          zelle_handle: zelleHandle,
           group_id: selectedGroupId,
           paid_by_user_id: paidByUserId,
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create bill');
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to create bill');
       }
 
       const { id, short_code, creator_participant_id, creator_token } = await response.json();
@@ -238,7 +243,12 @@ export default function CreatePage() {
       // Remember payment handles for next time
       localStorage.setItem(
         'splittr-payment-handles',
-        JSON.stringify({ venmo: venmoHandle.trim(), cashapp: cashappHandle.trim(), paypal: paypalHandle.trim() })
+        JSON.stringify({
+          venmo: venmoHandle.trim(),
+          cashapp: cashappHandle.trim(),
+          paypal: paypalHandle.trim(),
+          zelle: zelleHandle.trim(),
+        })
       );
 
       // Save to localStorage for "My Bills"
@@ -266,7 +276,8 @@ export default function CreatePage() {
       router.push(`/bill/${id}`);
     } catch (error) {
       console.error('Error creating bill:', error);
-      toast.error('Failed to create bill. Please try again.');
+      const message = error instanceof Error ? error.message : '';
+      toast.error(message && message !== 'Failed to create bill' ? message : 'Failed to create bill. Please try again.');
     } finally {
       setIsCreating(false);
     }
@@ -674,6 +685,15 @@ export default function CreatePage() {
                         placeholder="yourpaypalme"
                         value={paypalHandle}
                         onChange={(e) => setPaypalHandle(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="zelle" className="text-xs">Zelle</Label>
+                      <Input
+                        id="zelle"
+                        placeholder="Email or US phone number"
+                        value={zelleHandle}
+                        onChange={(e) => setZelleHandle(e.target.value)}
                       />
                     </div>
                   </div>
