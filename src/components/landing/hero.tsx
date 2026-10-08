@@ -19,7 +19,7 @@ export function Hero() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="pt-12 pb-20 sm:pt-20 lg:pt-24 lg:pb-28">
+    <section className="overflow-x-clip pt-12 pb-20 sm:pt-20 lg:pt-24 lg:pb-28">
       <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-10">
         <motion.div
           className="lg:col-span-5"

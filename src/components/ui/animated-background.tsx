@@ -22,7 +22,7 @@ export function AnimatedBackground() {
   const reduceMotion = useReducedMotion() && mounted;
 
   return (
-    <div className="fixed top-0 left-0 w-full h-[100lvh] pointer-events-none z-0">
+    <div className="fixed top-0 left-0 w-full h-[100lvh] overflow-hidden pointer-events-none z-0">
       <Aurora />
       {/* A touch stronger on phones, where the thin strokes read fainter on small
           screens. Under reduced motion the lines stay but hold still. */}
