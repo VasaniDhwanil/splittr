@@ -101,12 +101,15 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to save profile' }, { status: 500 });
     }
 
-    // Keep group member display names in sync with the profile
+    // Keep group member display names and bill participant names in sync
+    // with the profile. Signed-in participants are keyed by user_id, so a
+    // rename shows up on every bill they are on; realtime pushes the change
+    // to any open bill page. Guests (no user_id) are untouched.
     if (displayName !== undefined) {
-      await db
-        .from('group_members')
-        .update({ display_name: displayName })
-        .eq('user_id', user.id);
+      await Promise.all([
+        db.from('group_members').update({ display_name: displayName }).eq('user_id', user.id),
+        db.from('participants').update({ name: displayName }).eq('user_id', user.id),
+      ]);
     }
 
     return NextResponse.json(await presentProfile(db, profile));
