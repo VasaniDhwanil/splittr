@@ -8,9 +8,6 @@ import { useBillRealtime } from '@/hooks/use-bill-realtime';
 
 interface BindingConfig {
   event: string;
-  schema: string;
-  table: string;
-  filter?: string;
 }
 
 interface Binding {
@@ -19,8 +16,13 @@ interface Binding {
   cb: (payload: unknown) => void;
 }
 
+interface ChannelOptions {
+  config?: { private?: boolean };
+}
+
 interface FakeChannel {
   topic: string;
+  options: ChannelOptions | undefined;
   bindings: Binding[];
   statusCb: ((status: string) => void) | null;
   on: (type: string, cfg: BindingConfig, cb: (payload: unknown) => void) => FakeChannel;
@@ -29,9 +31,10 @@ interface FakeChannel {
 
 const fake = vi.hoisted(() => {
   const channels: FakeChannel[] = [];
-  const channel = vi.fn((topic: string): FakeChannel => {
+  const channel = vi.fn((topic: string, options?: ChannelOptions): FakeChannel => {
     const ch: FakeChannel = {
       topic,
+      options,
       bindings: [],
       statusCb: null,
       on(type, cfg, cb) {
@@ -60,19 +63,12 @@ function lastChannel(): FakeChannel {
   return ch;
 }
 
-function bindingsFor(table: string, event: string, ch: FakeChannel = lastChannel()): Binding[] {
-  return ch.bindings.filter((b) => b.cfg.table === table && b.cfg.event === event);
-}
-
-function binding(table: string, event: string, ch: FakeChannel = lastChannel()): Binding {
-  const found = bindingsFor(table, event, ch);
-  if (found.length !== 1) throw new Error(`expected 1 binding for ${table}/${event}, got ${found.length}`);
-  return found[0];
-}
-
-function fire(table: string, event: string, payload: unknown): void {
+/** Ring the doorbell the way the DB trigger does: broadcast `changed`. */
+function ring(payload: unknown = { table: 'item_claims', bill_id: BILL_ID }): void {
+  const bindings = lastChannel().bindings.filter((b) => b.type === 'broadcast' && b.cfg.event === 'changed');
+  if (bindings.length !== 1) throw new Error(`expected 1 doorbell binding, got ${bindings.length}`);
   act(() => {
-    binding(table, event).cb(payload);
+    bindings[0].cb({ type: 'broadcast', event: 'changed', payload });
   });
 }
 
@@ -92,25 +88,11 @@ const BILL_ID = 'bill-1';
 
 interface HookProps {
   billId: string | null;
-  itemIds: string[];
-  participantIds: string[];
-  claimIds: string[];
   onChange: () => void;
 }
 
-function baseProps(overrides: Partial<HookProps> = {}): HookProps {
-  return {
-    billId: BILL_ID,
-    itemIds: ['item-a', 'item-b'],
-    participantIds: ['p-1', 'p-2'],
-    claimIds: ['c-1', 'c-2'],
-    onChange: vi.fn(),
-    ...overrides,
-  };
-}
-
 function setup(overrides: Partial<HookProps> = {}) {
-  const initialProps = baseProps(overrides);
+  const initialProps: HookProps = { billId: BILL_ID, onChange: vi.fn(), ...overrides };
   const utils = renderHook((props: HookProps) => useBillRealtime(props), { initialProps });
   return { ...utils, props: initialProps };
 }
@@ -134,29 +116,36 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('useBillRealtime', () => {
-  it('subscribes once to bill:<id> with filtered INSERT/UPDATE and unfiltered DELETE bindings', () => {
+  it('subscribes once to the private bill:<id> doorbell and nothing else', () => {
     setup();
-
     expect(fake.channel).toHaveBeenCalledTimes(1);
-    expect(fake.channel).toHaveBeenCalledWith(`bill:${BILL_ID}`);
     const ch = lastChannel();
-    expect(ch.statusCb).not.toBeNull();
-    expect(ch.bindings.every((b) => b.type === 'postgres_changes' && b.cfg.schema === 'public')).toBe(true);
+    expect(ch.topic).toBe(`bill:${BILL_ID}`);
+    expect(ch.options?.config?.private).toBe(true);
+    expect(ch.bindings).toHaveLength(1);
+    expect(ch.bindings[0]).toMatchObject({ type: 'broadcast', cfg: { event: 'changed' } });
+    // No table subscriptions: clients can't read the tables any more
+    expect(ch.bindings.some((b) => b.type === 'postgres_changes')).toBe(false);
+  });
 
-    for (const event of ['INSERT', 'UPDATE']) {
-      expect(binding('bills', event).cfg.filter).toBe(`id=eq.${BILL_ID}`);
-      expect(binding('participants', event).cfg.filter).toBe(`bill_id=eq.${BILL_ID}`);
-      expect(binding('bill_items', event).cfg.filter).toBe(`bill_id=eq.${BILL_ID}`);
-      expect(binding('item_claims', event).cfg.filter).toBe('item_id=in.(item-a,item-b)');
-    }
-
+  it('calls onChange when the doorbell rings, for every table', () => {
+    const { props } = setup();
     for (const table of ['bills', 'participants', 'bill_items', 'item_claims']) {
-      const del = bindingsFor(table, 'DELETE');
-      expect(del).toHaveLength(1);
-      expect(del[0].cfg.filter).toBeUndefined();
+      ring({ table, bill_id: BILL_ID });
     }
+    expect(props.onChange).toHaveBeenCalledTimes(4);
+  });
 
-    expect(ch.bindings).toHaveLength(12);
+  it('ignores a doorbell that names a different bill', () => {
+    const { props } = setup();
+    ring({ table: 'bills', bill_id: 'someone-else' });
+    expect(props.onChange).not.toHaveBeenCalled();
+  });
+
+  it('still refetches on a doorbell without a payload (it only says "something changed")', () => {
+    const { props } = setup();
+    ring(undefined);
+    expect(props.onChange).toHaveBeenCalledTimes(1);
   });
 
   it('does not resubscribe for a new onChange identity', () => {
@@ -166,115 +155,21 @@ describe('useBillRealtime', () => {
     expect(fake.removeChannel).not.toHaveBeenCalled();
   });
 
-  it('does not resubscribe for a new claimIds array with the same contents', () => {
-    const { rerender, props } = setup();
-    rerender({ ...props, claimIds: [...props.claimIds] });
-    expect(fake.channel).toHaveBeenCalledTimes(1);
-    expect(fake.removeChannel).not.toHaveBeenCalled();
-  });
-
-  it('does not resubscribe for a new participantIds array', () => {
-    const { rerender, props } = setup();
-    rerender({ ...props, participantIds: ['p-1', 'p-2', 'p-3'] });
-    expect(fake.channel).toHaveBeenCalledTimes(1);
-    expect(fake.removeChannel).not.toHaveBeenCalled();
-  });
-
-  it('does not resubscribe when the same item ids arrive in a different order', () => {
-    const { rerender, props } = setup();
-    rerender({ ...props, itemIds: ['item-b', 'item-a'] });
-    expect(fake.channel).toHaveBeenCalledTimes(1);
-    expect(fake.removeChannel).not.toHaveBeenCalled();
-  });
-
-  it('rebuilds the channel when the set of item ids changes', () => {
-    const { rerender, props } = setup();
-    const first = lastChannel();
-    rerender({ ...props, itemIds: ['item-a', 'item-b', 'item-c'] });
-
-    expect(fake.removeChannel).toHaveBeenCalledTimes(1);
-    expect(fake.removeChannel).toHaveBeenCalledWith(first);
-    expect(fake.channel).toHaveBeenCalledTimes(2);
-    expect(lastChannel()).not.toBe(first);
-    expect(binding('item_claims', 'INSERT').cfg.filter).toBe('item_id=in.(item-a,item-b,item-c)');
-    // removeChannel ran before the new channel was created
-    expect(fake.removeChannel.mock.invocationCallOrder[0]).toBeLessThan(
-      fake.channel.mock.invocationCallOrder[1]
-    );
-  });
-
-  it('item_claims DELETE notifies only for a known claim id', () => {
-    const { props } = setup();
-    fire('item_claims', 'DELETE', { old: { id: 'c-unknown' } });
-    expect(props.onChange).not.toHaveBeenCalled();
-    fire('item_claims', 'DELETE', { old: { id: 'c-2' } });
-    expect(props.onChange).toHaveBeenCalledTimes(1);
-  });
-
-  it('item_claims DELETE sees claim ids updated after subscribe', () => {
-    const { rerender, props } = setup();
-    rerender({ ...props, claimIds: ['c-new'] });
-    fire('item_claims', 'DELETE', { old: { id: 'c-1' } });
-    expect(props.onChange).not.toHaveBeenCalled();
-    fire('item_claims', 'DELETE', { old: { id: 'c-new' } });
-    expect(props.onChange).toHaveBeenCalledTimes(1);
-  });
-
-  it('participants DELETE notifies only for a known participant id', () => {
-    const { props } = setup();
-    fire('participants', 'DELETE', { old: { id: 'p-unknown' } });
-    expect(props.onChange).not.toHaveBeenCalled();
-    fire('participants', 'DELETE', { old: { id: 'p-1' } });
-    expect(props.onChange).toHaveBeenCalledTimes(1);
-  });
-
-  it('bill_items DELETE notifies only for a known item id', () => {
-    const { props } = setup();
-    fire('bill_items', 'DELETE', { old: { id: 'item-unknown' } });
-    expect(props.onChange).not.toHaveBeenCalled();
-    fire('bill_items', 'DELETE', { old: { id: 'item-a' } });
-    expect(props.onChange).toHaveBeenCalledTimes(1);
-  });
-
-  it('bills DELETE notifies only when old.id is this bill', () => {
-    const { props } = setup();
-    fire('bills', 'DELETE', { old: { id: 'other-bill' } });
-    expect(props.onChange).not.toHaveBeenCalled();
-    fire('bills', 'DELETE', { old: { id: BILL_ID } });
-    expect(props.onChange).toHaveBeenCalledTimes(1);
-  });
-
-  it('filtered participants INSERT calls onChange', () => {
-    const { props } = setup();
-    fire('participants', 'INSERT', { new: { id: 'p-3', bill_id: BILL_ID } });
-    expect(props.onChange).toHaveBeenCalledTimes(1);
-  });
-
   it('calls the latest onChange after a rerender with a new callback', () => {
     const { rerender, props } = setup();
     const next = vi.fn();
     rerender({ ...props, onChange: next });
-    fire('participants', 'INSERT', { new: { id: 'p-3' } });
+    ring();
     expect(props.onChange).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  it('with more than 100 items, claim upserts are unfiltered and gated by item id', () => {
-    const itemIds = Array.from({ length: 101 }, (_, i) => `item-${i}`);
-    const { props } = setup({ itemIds });
-
-    expect(binding('item_claims', 'INSERT').cfg.filter).toBeUndefined();
-    expect(binding('item_claims', 'UPDATE').cfg.filter).toBeUndefined();
-
-    fire('item_claims', 'INSERT', { new: { id: 'c-9', item_id: 'not-ours' } });
-    fire('item_claims', 'UPDATE', { new: { id: 'c-9', item_id: 'not-ours' } });
-    fire('item_claims', 'INSERT', { new: { id: 'c-9' } });
-    expect(props.onChange).not.toHaveBeenCalled();
-
-    fire('item_claims', 'INSERT', { new: { id: 'c-9', item_id: 'item-50' } });
-    expect(props.onChange).toHaveBeenCalledTimes(1);
-    fire('item_claims', 'UPDATE', { new: { id: 'c-9', item_id: 'item-100' } });
-    expect(props.onChange).toHaveBeenCalledTimes(2);
+  it('moves to the new bill when billId changes', () => {
+    const { rerender, props } = setup();
+    const first = lastChannel();
+    rerender({ ...props, billId: 'bill-2' });
+    expect(fake.removeChannel).toHaveBeenCalledWith(first);
+    expect(lastChannel().topic).toBe('bill:bill-2');
   });
 
   it('catches up when the document becomes visible', () => {

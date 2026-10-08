@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,7 @@ import {
   SlidersHorizontal,
   ExternalLink,
   SearchX,
+  QrCode,
 } from 'lucide-react';
 import { formatCurrency, calculateSplits, billTotal, formatShare, formatQuantity } from '@/lib/calculations';
 import { getPaymentOptions, billHasPaymentMethods, getZelleInfo } from '@/lib/payment-links';
@@ -44,6 +45,7 @@ import { createClient } from '@/lib/supabase/client';
 import { AvatarInitials, AvatarStack, getPersonHex } from '@/components/avatar-initials';
 import { SplitSheet, SplitEntry } from '@/components/split-sheet';
 import { useBillRealtime } from '@/hooks/use-bill-realtime';
+import { ShareQrDialog } from '@/components/share-qr-dialog';
 
 interface EditableItem {
   id?: string;
@@ -81,6 +83,7 @@ export default function BillPage() {
 
   const [splits, setSplits] = useState<ParticipantSplit[]>([]);
   const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
   const [claimingItemId, setClaimingItemId] = useState<string | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
   const [hasShownConfetti, setHasShownConfetti] = useState(false);
@@ -181,10 +184,7 @@ export default function BillPage() {
   }, [fetchBill]);
 
   // Live updates: any relevant change rings scheduleFetch (refetch-on-doorbell)
-  const itemIds = useMemo(() => items.map((i) => i.id), [items]);
-  const participantIds = useMemo(() => participants.map((p) => p.id), [participants]);
-  const claimIds = useMemo(() => claims.map((c) => c.id), [claims]);
-  useBillRealtime({ billId: bill?.id ?? null, itemIds, participantIds, claimIds, onChange: scheduleFetch });
+  useBillRealtime({ billId: bill?.id ?? null, onChange: scheduleFetch });
 
   // Check for saved participant + creator token in localStorage
   useEffect(() => {
@@ -820,6 +820,16 @@ export default function BillPage() {
                 <Button variant="outline" size="icon" onClick={handleShare} className="transition-smooth hover:scale-105">
                   <Share2 className="h-4 w-4" />
                 </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowQr(true)}
+                  className="transition-smooth hover:scale-105"
+                  title="Show QR code"
+                  aria-label="Show QR code"
+                >
+                  <QrCode className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 
@@ -1439,6 +1449,15 @@ export default function BillPage() {
             </div>
           </div>
         )}
+
+        {/* Scan-to-join code for the table */}
+        <ShareQrDialog
+          open={showQr}
+          onOpenChange={setShowQr}
+          url={typeof window !== 'undefined' ? `${window.location.origin}/bill/${bill.id}` : ''}
+          billName={bill.name}
+          shortCode={bill.short_code}
+        />
 
         {/* The split sheet — replaces the old quantity and portion pickers */}
         <SplitSheet
