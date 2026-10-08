@@ -3,7 +3,8 @@
 # go through the API (service role). With only RLS in the way, UPDATE and
 # DELETE "succeed" as 204 with zero rows; without the privilege they are
 # refused outright, so a policy mistake later can't open a write path.
-# Also: profiles/groups/group_members are not readable at all.
+# Also: no table is readable at all (realtime is a private Broadcast
+# doorbell since migration 013/014).
 #
 # Usage:  bash scripts/db-grants-test.sh
 set -u
@@ -26,8 +27,9 @@ for t in bills participants bill_items item_claims profiles groups group_members
   check "anon DELETE $t refused" refused "$(refused "$(req DELETE $t)")"
   check "anon INSERT $t refused" refused "$(refused "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SUPA_URL/rest/v1/$t" -H "apikey: $ANON" -H 'Content-Type: application/json' -d '{}')")"
 done
-for t in profiles groups group_members; do
-  check "anon SELECT $t refused or empty" "none" "$(curl -s "$SUPA_URL/rest/v1/$t?select=*&limit=1" -H "apikey: $ANON" | python3 -c "import json,sys
+col () { [ "$1" = profiles ] && echo user_id || echo created_at; }  # a column each table has
+for t in bills participants bill_items item_claims profiles groups group_members; do
+  check "anon SELECT $t refused or empty" "none" "$(curl -s "$SUPA_URL/rest/v1/$t?select=$(col $t)&limit=1" -H "apikey: $ANON" | python3 -c "import json,sys
 d=json.load(sys.stdin)
 print('none' if not isinstance(d,list) or len(d)==0 else 'rows')")"
 done

@@ -2,7 +2,8 @@
 # creator_token must never leave the server except in the bill-create
 # response (the creator's one copy). Checks every API surface that returns
 # bill rows, the public PostgREST endpoint (anon key), and that ownership
-# still works by token and by session.
+# still works by token and by session. (That clients can't read tables
+# at all is covered by db-grants-test.sh.)
 #
 # Usage:  BASE=http://localhost:3000 bash scripts/token-exposure-test.sh
 # Requires: .env.local with NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
@@ -84,14 +85,6 @@ rest () { curl -s -o $WORK/rest -w '%{http_code}' "$SUPA_URL/rest/v1/bills?$1" -
 check "anon select creator_token denied" "no" "$(s=$(rest "id=eq.$BILL&select=creator_token"); grep -q "$TOKEN" $WORK/rest && echo yes || echo no)"
 check "anon select=* exposes no token"   "no" "$(s=$(rest "id=eq.$BILL&select=*"); grep -q "$TOKEN" $WORK/rest && echo yes || echo no)"
 check "anon bulk dump exposes no tokens" "no" "$(s=$(rest "select=creator_token&limit=1000"); grep -q '"creator_token":"' $WORK/rest && echo yes || echo no)"
-check "anon can still read bill fields"  200 "$(rest "id=eq.$BILL&select=id,name,short_code,status")"
-check "anon read returns the bill"       "Token test 2" "$(python3 -c "import json;print(json.load(open('$WORK/rest'))[0]['name'])" 2>/dev/null)"
-# Every column except creator_token stays readable (catches a new column
-# added without its GRANT; see migration 010)
-COLS=$(curl -s "$SUPA_URL/rest/v1/bills?id=eq.$BILL&select=*" -H "apikey: $SRK" -H "Authorization: Bearer $SRK" \
-  | python3 -c "import json,sys;print(','.join(k for k in json.load(sys.stdin)[0] if k!='creator_token'))")
-check "anon can read every other column" 200 "$(rest "id=eq.$BILL&select=$COLS")"
-
 echo; echo "== cleanup =="
 check "creator DELETE with token"       200 "$(curl -s -o /dev/null -w %{http_code} -X DELETE $BASE/api/bills/$BILL -H "X-Creator-Token: $TOKEN")"
 check "group bill DELETE with token"    200 "$(curl -s -o /dev/null -w %{http_code} -X DELETE $BASE/api/bills/$GBILL -H "X-Creator-Token: $GTOKEN")"
