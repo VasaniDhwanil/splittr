@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,7 @@ import { Bill, BillItem, Participant, ItemClaim, ParticipantSplit, SplitMode, Ti
 import { createClient } from '@/lib/supabase/client';
 import { AvatarInitials, AvatarStack, getPersonHex } from '@/components/avatar-initials';
 import { SplitSheet, SplitEntry } from '@/components/split-sheet';
+import { useBillRealtime } from '@/hooks/use-bill-realtime';
 
 interface EditableItem {
   id?: string;
@@ -177,115 +178,11 @@ export default function BillPage() {
     fetchBill();
   }, [fetchBill]);
 
-  // Set up real-time subscriptions
-  useEffect(() => {
-    if (!bill) return;
-
-    const supabase = createClient();
-
-    // Subscribe to participants changes
-    const participantsChannel = supabase
-      .channel('participants-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'participants',
-          filter: `bill_id=eq.${bill.id}`,
-        },
-        () => {
-          scheduleFetch();
-        }
-      )
-      .subscribe();
-
-    // Subscribe to bill changes (edits, status, payment handles)
-    const billChannel = supabase
-      .channel('bill-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'bills',
-          filter: `id=eq.${bill.id}`,
-        },
-        () => {
-          scheduleFetch();
-        }
-      )
-      .subscribe();
-
-    // Subscribe to item changes (creator edits)
-    const itemsChannel = supabase
-      .channel('items-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'bill_items',
-          filter: `bill_id=eq.${bill.id}`,
-        },
-        () => {
-          scheduleFetch();
-        }
-      )
-      .subscribe();
-
-    // Subscribe to claims changes - only for items in this bill.
-    // DELETE events can't be filtered (their payload only carries the primary
-    // key), so they get their own unfiltered listener — without it, unclaims
-    // from other devices never refresh the page.
-    const claimsChannel = items.length > 0
-      ? supabase
-          .channel('claims-changes')
-          .on(
-            'postgres_changes',
-            {
-              event: 'INSERT',
-              schema: 'public',
-              table: 'item_claims',
-              filter: `item_id=in.(${items.map(i => i.id).join(',')})`,
-            },
-            () => {
-              scheduleFetch();
-            }
-          )
-          .on(
-            'postgres_changes',
-            {
-              event: 'UPDATE',
-              schema: 'public',
-              table: 'item_claims',
-              filter: `item_id=in.(${items.map(i => i.id).join(',')})`,
-            },
-            () => {
-              scheduleFetch();
-            }
-          )
-          .on(
-            'postgres_changes',
-            {
-              event: 'DELETE',
-              schema: 'public',
-              table: 'item_claims',
-            },
-            () => {
-              scheduleFetch();
-            }
-          )
-          .subscribe()
-      : null;
-
-    return () => {
-      supabase.removeChannel(participantsChannel);
-      supabase.removeChannel(billChannel);
-      supabase.removeChannel(itemsChannel);
-      if (claimsChannel) supabase.removeChannel(claimsChannel);
-    };
-  }, [bill, items, fetchBill, scheduleFetch]);
+  // Live updates: any relevant change rings scheduleFetch (refetch-on-doorbell)
+  const itemIds = useMemo(() => items.map((i) => i.id), [items]);
+  const participantIds = useMemo(() => participants.map((p) => p.id), [participants]);
+  const claimIds = useMemo(() => claims.map((c) => c.id), [claims]);
+  useBillRealtime({ billId: bill?.id ?? null, itemIds, participantIds, claimIds, onChange: scheduleFetch });
 
   // Check for saved participant + creator token in localStorage
   useEffect(() => {
