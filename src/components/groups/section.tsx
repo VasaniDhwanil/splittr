@@ -21,7 +21,7 @@ export function Section({ title, description, count, action, index, children }: 
             <h2 className="text-base font-semibold tracking-tight text-white">
               {title}
               {count !== undefined && (
-                <span className="ml-2 font-normal tabular-nums text-white/35">{count}</span>
+                <span className="ml-2 font-normal tabular-nums text-white/35"> {count}</span>
               )}
             </h2>
             {description && <p className="mt-1 text-sm text-white/40">{description}</p>}
