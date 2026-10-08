@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { parseZelleInput, ZELLE_INPUT_ERROR } from '@/lib/payment-links';
+import { presentProfile } from '@/lib/zelle-server';
 
 export async function GET() {
   try {
@@ -20,7 +22,20 @@ export async function GET() {
       .eq('user_id', user.id)
       .maybeSingle();
 
-    return NextResponse.json(profile ?? { user_id: user.id, display_name: null, venmo_handle: null, cashapp_handle: null, paypal_handle: null });
+    return NextResponse.json(
+      await presentProfile(
+        db,
+        profile ?? {
+          user_id: user.id,
+          display_name: null,
+          venmo_handle: null,
+          cashapp_handle: null,
+          paypal_handle: null,
+          zelle_handle: null,
+          zelle_qr_path: null,
+        }
+      )
+    );
   } catch (error) {
     console.error('Error in profile GET:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -43,10 +58,15 @@ export async function PUT(request: NextRequest) {
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
-    const { display_name, venmo_handle, cashapp_handle, paypal_handle } = body;
+    const { display_name, venmo_handle, cashapp_handle, paypal_handle, zelle_handle } = body;
 
     if (display_name !== undefined && (typeof display_name !== 'string' || !display_name.trim())) {
       return NextResponse.json({ error: 'Display name cannot be empty' }, { status: 400 });
+    }
+
+    const zelle = parseZelleInput(zelle_handle);
+    if (!zelle.ok) {
+      return NextResponse.json({ error: ZELLE_INPUT_ERROR }, { status: 400 });
     }
 
     const { data: profile, error } = await db
@@ -58,6 +78,7 @@ export async function PUT(request: NextRequest) {
           ...(venmo_handle !== undefined ? { venmo_handle: venmo_handle?.trim() || null } : {}),
           ...(cashapp_handle !== undefined ? { cashapp_handle: cashapp_handle?.trim() || null } : {}),
           ...(paypal_handle !== undefined ? { paypal_handle: paypal_handle?.trim() || null } : {}),
+          ...(zelle.value !== undefined ? { zelle_handle: zelle.value } : {}),
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
@@ -78,7 +99,7 @@ export async function PUT(request: NextRequest) {
         .eq('user_id', user.id);
     }
 
-    return NextResponse.json(profile);
+    return NextResponse.json(await presentProfile(db, profile));
   } catch (error) {
     console.error('Error in profile PUT:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

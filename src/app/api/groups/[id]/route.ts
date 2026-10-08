@@ -62,7 +62,7 @@ export async function GET(
 
     const memberIds = (members || []).map((m) => m.user_id);
     const { data: profiles } = memberIds.length
-      ? await db.from('profiles').select('*').in('user_id', memberIds)
+      ? await db.from('profiles').select('user_id, display_name, venmo_handle, cashapp_handle, paypal_handle, zelle_handle').in('user_id', memberIds)
       : { data: [] };
 
     const membersWithProfiles = (members || []).map((m) => ({

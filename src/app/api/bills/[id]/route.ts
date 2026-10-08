@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireBillOwnership } from '@/lib/auth-helpers';
 import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
+import { parseZelleInput, ZELLE_INPUT_ERROR } from '@/lib/payment-links';
+import { signZelleQr } from '@/lib/zelle-server';
 
 export async function GET(
   request: NextRequest,
@@ -54,12 +56,13 @@ export async function GET(
       .in('item_id', itemIds);
 
     // Smart pay: when the host hasn't set handles on this bill, fall back to
-    // the payment handles configured on their profile
+    // the payment handles configured on their profile. The host's Zelle QR
+    // (profile-only) rides along whenever the host is the one collecting.
     let handleFallback: Record<string, string | null> = {};
-    if (bill.creator_user_id && (!bill.venmo_handle || !bill.cashapp_handle || !bill.paypal_handle)) {
+    if (bill.creator_user_id) {
       const { data: profile } = await db
         .from('profiles')
-        .select('venmo_handle, cashapp_handle, paypal_handle')
+        .select('venmo_handle, cashapp_handle, paypal_handle, zelle_handle, zelle_qr_path')
         .eq('user_id', bill.creator_user_id)
         .maybeSingle();
       if (profile) {
@@ -67,6 +70,8 @@ export async function GET(
           venmo_handle: bill.venmo_handle || profile.venmo_handle,
           cashapp_handle: bill.cashapp_handle || profile.cashapp_handle,
           paypal_handle: bill.paypal_handle || profile.paypal_handle,
+          zelle_handle: bill.zelle_handle || profile.zelle_handle,
+          zelle_qr_url: await signZelleQr(db, profile.zelle_qr_path),
         };
       }
     }
@@ -87,7 +92,7 @@ export async function GET(
         const member = groupMembers.find((m) => m.user_id === bill.paid_by_user_id);
         const { data: payerProfile } = await db
           .from('profiles')
-          .select('display_name, venmo_handle, cashapp_handle, paypal_handle')
+          .select('display_name, venmo_handle, cashapp_handle, paypal_handle, zelle_handle, zelle_qr_path')
           .eq('user_id', bill.paid_by_user_id)
           .maybeSingle();
         paidBy = {
@@ -96,6 +101,8 @@ export async function GET(
           venmo_handle: payerProfile?.venmo_handle ?? null,
           cashapp_handle: payerProfile?.cashapp_handle ?? null,
           paypal_handle: payerProfile?.paypal_handle ?? null,
+          zelle_handle: payerProfile?.zelle_handle ?? null,
+          zelle_qr_url: await signZelleQr(db, payerProfile?.zelle_qr_path),
         };
       }
     }
@@ -151,6 +158,7 @@ export async function PATCH(
       venmo_handle,
       cashapp_handle,
       paypal_handle,
+      zelle_handle,
       group_id,
       items,
     } = body;
@@ -234,6 +242,11 @@ export async function PATCH(
     if (venmo_handle !== undefined) updateData.venmo_handle = cleanText(venmo_handle, LIMITS.handle) || null;
     if (cashapp_handle !== undefined) updateData.cashapp_handle = cleanText(cashapp_handle, LIMITS.handle) || null;
     if (paypal_handle !== undefined) updateData.paypal_handle = cleanText(paypal_handle, LIMITS.handle) || null;
+    const zelle = parseZelleInput(zelle_handle);
+    if (!zelle.ok) {
+      return NextResponse.json({ error: ZELLE_INPUT_ERROR }, { status: 400 });
+    }
+    if (zelle.value !== undefined) updateData.zelle_handle = zelle.value;
     if (group_id !== undefined) updateData.group_id = group_id || null;
 
     // Sync items if provided: update kept rows (claims survive), insert new, delete removed

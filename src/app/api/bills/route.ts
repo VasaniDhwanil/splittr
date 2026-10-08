@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { generateShortCode } from '@/lib/calculations';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
 import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
+import { parseZelleInput, ZELLE_INPUT_ERROR } from '@/lib/payment-links';
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,6 +46,10 @@ export async function POST(request: NextRequest) {
     const venmo_handle = cleanText(body.venmo_handle, LIMITS.handle) || null;
     const cashapp_handle = cleanText(body.cashapp_handle, LIMITS.handle) || null;
     const paypal_handle = cleanText(body.paypal_handle, LIMITS.handle) || null;
+    const zelle = parseZelleInput(body.zelle_handle);
+    if (!zelle.ok) {
+      return NextResponse.json({ error: ZELLE_INPUT_ERROR }, { status: 400 });
+    }
 
     if (!name || !creator_name) {
       return NextResponse.json({ error: 'Bill name and your name are required' }, { status: 400 });
@@ -149,6 +154,7 @@ export async function POST(request: NextRequest) {
         venmo_handle,
         cashapp_handle,
         paypal_handle,
+        zelle_handle: zelle.value ?? null,
         group_id: validGroupId,
         paid_by_user_id: paidByUserId,
         ...(user ? { creator_user_id: user.id } : {}),

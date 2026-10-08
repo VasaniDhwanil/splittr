@@ -18,6 +18,9 @@ export interface Bill {
   venmo_handle?: string | null;
   cashapp_handle?: string | null;
   paypal_handle?: string | null;
+  zelle_handle?: string | null;
+  /** Signed URL for the creator's Zelle QR, enriched by GET /api/bills/[id]. */
+  zelle_qr_url?: string | null;
   group_id?: string | null;
   /** Whose money covered the bill; null = the creator paid (default). */
   paid_by_user_id?: string | null;
@@ -34,6 +37,8 @@ export interface PaidBy {
   venmo_handle?: string | null;
   cashapp_handle?: string | null;
   paypal_handle?: string | null;
+  zelle_handle?: string | null;
+  zelle_qr_url?: string | null;
 }
 
 export interface BillItem {
@@ -80,6 +85,8 @@ export interface Profile {
   venmo_handle: string | null;
   cashapp_handle: string | null;
   paypal_handle: string | null;
+  zelle_handle?: string | null;
+  zelle_qr_url?: string | null;
 }
 
 export interface GroupMember {
