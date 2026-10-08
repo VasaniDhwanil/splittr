@@ -6,6 +6,8 @@ interface AvatarInitialsProps {
   name: string;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
+  /** Explicit chip color (hex) instead of the name-derived one. */
+  color?: string;
 }
 
 // Sticker-bright palette — every person gets a vivid chip color.
@@ -68,9 +70,9 @@ const sizeClasses = {
   lg: 'w-10 h-10 text-sm',
 };
 
-export function AvatarInitials({ name, size = 'md', className }: AvatarInitialsProps) {
+export function AvatarInitials({ name, size = 'md', className, color }: AvatarInitialsProps) {
   const initials = getInitials(name);
-  const colorClass = getAvatarColor(name);
+  const colorClass = color ? undefined : getAvatarColor(name);
 
   return (
     <div
@@ -80,6 +82,7 @@ export function AvatarInitials({ name, size = 'md', className }: AvatarInitialsP
         colorClass,
         className
       )}
+      style={color ? { backgroundColor: color, color: '#082f49' } : undefined}
       title={name}
     >
       {initials}
@@ -93,9 +96,11 @@ interface AvatarStackProps {
   max?: number;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
+  /** Per-name color overrides (hex). */
+  colors?: Record<string, string>;
 }
 
-export function AvatarStack({ names, max = 3, size = 'sm', className }: AvatarStackProps) {
+export function AvatarStack({ names, max = 3, size = 'sm', className, colors }: AvatarStackProps) {
   const displayed = names.slice(0, max);
   const remaining = names.length - max;
 
@@ -106,6 +111,7 @@ export function AvatarStack({ names, max = 3, size = 'sm', className }: AvatarSt
           key={`${name}-${index}`}
           name={name}
           size={size}
+          color={colors?.[name]}
           className="ring-2 ring-background"
         />
       ))}

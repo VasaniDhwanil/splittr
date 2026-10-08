@@ -1,5 +1,6 @@
 import { ArrowUpRight } from 'lucide-react';
 import { AvatarInitials } from '@/components/avatar-initials';
+import { PERSON_COLORS } from './bill-preview';
 import { formatCurrency } from '@/lib/calculations';
 import { InView } from './in-view';
 
@@ -14,7 +15,7 @@ function SettlePreview() {
       aria-label="Example: you owe Rhythm $16.11, with Venmo, Cash App and PayPal buttons"
     >
       <div className="flex items-center gap-3">
-        <AvatarInitials name="Rhythm" size="md" className="shrink-0 shadow-none" />
+        <AvatarInitials name="Rhythm" size="md" color={PERSON_COLORS.Rhythm} className="shrink-0 shadow-none" />
         <p className="min-w-0 flex-1 truncate font-medium text-white">You owe Rhythm</p>
         <span className="font-money shrink-0 text-lg text-foreground">{formatCurrency(16.11)}</span>
       </div>

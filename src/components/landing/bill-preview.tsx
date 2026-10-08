@@ -16,6 +16,9 @@ import { formatCurrency } from '@/lib/calculations';
 
 const ME = 'Ines';
 const PEOPLE = ['Rhythm', 'Marcus', 'Ines', 'Tomás'];
+// One cool pop among the warm palette: the host is sky blue.
+export const PERSON_COLORS: Record<string, string> = { Rhythm: '#38bdf8' };
+const hexFor = (name: string) => PERSON_COLORS[name] ?? getPersonHex(name);
 const TAX = 4.35;
 const TIP = 9.8;
 
@@ -62,7 +65,7 @@ function shareFor(phase: Phase): number {
  * an overlay (see rowGradient) that fades in and out over this base.
  */
 function rowStyle(claimers: string[]): CSSProperties {
-  const hexes = claimers.map(getPersonHex);
+  const hexes = claimers.map(hexFor);
   const mine = claimers.includes(ME);
   if (hexes.length === 1) {
     return {
@@ -73,7 +76,7 @@ function rowStyle(claimers: string[]): CSSProperties {
   if (hexes.length > 1) {
     return {
       backgroundColor: `${hexes[0]}00`,
-      boxShadow: mine ? `inset 0 0 0 1.5px ${getPersonHex(ME)}59` : `inset 0 0 0 1.5px ${hexes[0]}00`,
+      boxShadow: mine ? `inset 0 0 0 1.5px ${hexFor(ME)}59` : `inset 0 0 0 1.5px ${hexes[0]}00`,
     };
   }
   return {};
@@ -83,7 +86,7 @@ function rowStyle(claimers: string[]): CSSProperties {
 function rowGradient(item: SampleItem): string | null {
   const widest = item.claims.reduce((a, b) => (b.length > a.length ? b : a));
   if (widest.length < 2) return null;
-  const hexes = widest.map(getPersonHex);
+  const hexes = widest.map(hexFor);
   return `linear-gradient(100deg, ${hexes
     .map((hex, i) => `${hex}1f ${(i / (hexes.length - 1)) * 100}%`)
     .join(', ')})`;
@@ -147,7 +150,7 @@ export function BillPreview({ className }: BillPreviewProps) {
 
   const phase: Phase = reduceMotion ? 2 : animatedPhase;
   const share = shareFor(phase);
-  const myHex = getPersonHex(ME);
+  const myHex = hexFor(ME);
 
   const shareValue = useMotionValue(0);
   const shareText = useTransform(shareValue, (v) => formatCurrency(v));
@@ -173,7 +176,7 @@ export function BillPreview({ className }: BillPreviewProps) {
           <p className="truncate text-lg font-semibold tracking-tight text-white">Friday tacos</p>
           <p className="mt-0.5 text-sm text-white/40">Hosted by Rhythm · 4 people</p>
         </div>
-        <AvatarStack names={PEOPLE} max={4} size="sm" className="shrink-0 pt-1" />
+        <AvatarStack names={PEOPLE} max={4} size="sm" colors={PERSON_COLORS} className="shrink-0 pt-1" />
       </div>
 
       <div className="space-y-2.5">
@@ -215,7 +218,7 @@ export function BillPreview({ className }: BillPreviewProps) {
                           exit={{ opacity: 0, scale: 0.9, y: -4 }}
                           transition={FADE}
                         >
-                          <AvatarStack names={claimers} max={4} size="sm" />
+                          <AvatarStack names={claimers} max={4} size="sm" colors={PERSON_COLORS} />
                           {note && <span className="truncate text-xs text-muted-foreground">{note}</span>}
                         </motion.div>
                       )}
@@ -269,7 +272,7 @@ export function BillPreview({ className }: BillPreviewProps) {
 
       <div className="mt-4 flex items-center justify-between gap-4 rounded-xl bg-white/[0.04] px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
         <div className="flex items-center gap-2.5">
-          <AvatarInitials name={ME} size="sm" className="shadow-none" />
+          <AvatarInitials name={ME} size="sm" color={PERSON_COLORS[ME]} className="shadow-none" />
           <span className="text-sm font-medium text-white/70">Your share</span>
         </div>
         <motion.span className="font-money text-2xl tabular-nums text-primary">{shareText}</motion.span>
