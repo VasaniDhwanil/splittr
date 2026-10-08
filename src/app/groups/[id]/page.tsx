@@ -116,7 +116,7 @@ export default function GroupPage() {
     if (!group?.invite_code) return;
     const url = `${window.location.origin}/groups/join?code=${group.invite_code}`;
     navigator.clipboard.writeText(url);
-    toast.success('Invite link copied — send it to your people!');
+    toast.success('Invite link copied. Send it to your people!');
   };
 
   const handleEmailInvite = async (e: React.FormEvent) => {
@@ -154,7 +154,7 @@ export default function GroupPage() {
       if (failed.length > 0) {
         // Keep the failed addresses in the input so they're easy to retry
         setInviteEmail(failed.map((f) => f.email).join(', '));
-        toast.error(`Couldn't send to ${failed.map((f) => f.email).join(', ')} — ${failed[0].reason}`);
+        toast.error(`Couldn't send to ${failed.map((f) => f.email).join(', ')}: ${failed[0].reason}`);
       } else {
         setInviteEmail('');
       }
@@ -210,7 +210,7 @@ export default function GroupPage() {
     try {
       const response = await fetch(`/api/groups/${groupId}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Failed to delete group');
-      toast.success('Group deleted — its bills are kept');
+      toast.success('Group deleted. Its bills are kept.');
       router.push('/');
     } catch {
       toast.error('Failed to delete group');

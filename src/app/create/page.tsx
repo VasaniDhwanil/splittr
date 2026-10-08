@@ -169,13 +169,13 @@ export default function CreatePage() {
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         if (response.status === 422 || body.code === 'not_a_receipt') {
-          toast.error("That doesn't look like a receipt 🧾", {
+          toast.error("That doesn't look like a receipt", {
             description: 'Try a clearer photo of the bill, or enter the items manually below.',
           });
           return;
         }
         if (response.status === 429) {
-          toast.error('Slow down a sec ⏳', {
+          toast.error('Too many scans right now', {
             description: body.error || 'Too many scans. Try again in a few minutes.',
           });
           return;
