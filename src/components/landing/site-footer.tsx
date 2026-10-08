@@ -5,6 +5,7 @@ const LINKS = [
   { href: '/signin', label: 'Sign in' },
   { href: '/create', label: 'Split a Bill' },
   { href: '/join', label: 'Join a Bill' },
+  { href: '/guides', label: 'Guides' },
 ];
 
 export function SiteFooter({ signedIn }: { signedIn: boolean }) {
