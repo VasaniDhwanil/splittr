@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -11,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Receipt, Users, Calculator, Share2, Loader2, X, Eye, EyeOff, Plus, Wallet } from 'lucide-react';
+import { Receipt, Loader2, X, Eye, EyeOff, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Bill, Participant } from '@/types';
@@ -21,7 +20,13 @@ import { toast } from 'sonner';
 import { GroupCard } from '@/components/groups/group-card';
 import { GroupDialog } from '@/components/groups/group-dialog';
 import { BillRow } from '@/components/groups/bill-row';
-
+import { SiteNav } from '@/components/landing/site-nav';
+import { Hero } from '@/components/landing/hero';
+import { HowItWorks } from '@/components/landing/how-it-works';
+import { WhySplittr } from '@/components/landing/why-splittr';
+import { GroupsStatement } from '@/components/landing/groups-statement';
+import { ClosingCta } from '@/components/landing/closing-cta';
+import { SiteFooter } from '@/components/landing/site-footer';
 
 interface StoredBill {
   id: string;
@@ -58,6 +63,28 @@ interface GroupSummary {
   member_count?: number;
 }
 
+
+/** Quiet placeholder rows in the bill list's shape. */
+function BillListSkeleton({ rows = 2 }: { rows?: number }) {
+  return (
+    <div
+      className="animate-pulse divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]"
+      aria-busy="true"
+      aria-label="Loading bills"
+    >
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-4">
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-4 w-40 max-w-full rounded-md bg-white/[0.06]" />
+            <div className="h-3 w-24 rounded-md bg-white/[0.04]" />
+          </div>
+          <div className="h-5 w-16 rounded-md bg-white/[0.06]" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Home() {
   const [myBills, setMyBills] = useState<StoredBill[]>([]);
   const [billDetails, setBillDetails] = useState<Record<string, BillWithParticipants>>({});
@@ -67,6 +94,7 @@ export default function Home() {
 
   // Auth state
   const [user, setUser] = useState<{ email: string; id: string } | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [serverBills, setServerBills] = useState<StoredBill[]>([]);
   const [showClaimPrompt, setShowClaimPrompt] = useState(false);
   const [claimableBills, setClaimableBills] = useState<StoredBill[]>([]);
@@ -120,34 +148,35 @@ export default function Home() {
 
   useEffect(() => {
     const loadBills = async () => {
+      // Start the auth check right away so the page can pick between the
+      // landing and the dashboard without waiting on bill details.
+      const supabase = createClient();
+      const authPromise = supabase.auth.getUser();
+
       // Load bills from localStorage
       const stored = localStorage.getItem('splittr-my-bills');
       let bills: StoredBill[] = [];
+      let detailsPromise: Promise<({ id: string; data: BillWithParticipants } | null)[]> = Promise.resolve([]);
       if (stored) {
         try {
           bills = JSON.parse(stored);
           setMyBills(bills);
 
           // Fetch details for all bills in parallel
-          const fetchPromises = bills.map(async (bill) => {
-            try {
-              const response = await fetch(`/api/bills/${bill.id}`);
-              if (response.ok) {
-                const data = await response.json();
-                return { id: bill.id, data };
+          detailsPromise = Promise.all(
+            bills.map(async (bill) => {
+              try {
+                const response = await fetch(`/api/bills/${bill.id}`);
+                if (response.ok) {
+                  const data = await response.json();
+                  return { id: bill.id, data };
+                }
+              } catch (error) {
+                console.error('Error fetching bill:', error);
               }
-            } catch (error) {
-              console.error('Error fetching bill:', error);
-            }
-            return null;
-          });
-
-          const results = await Promise.all(fetchPromises);
-          const details: Record<string, BillWithParticipants> = {};
-          results.forEach(result => {
-            if (result) details[result.id] = result.data;
-          });
-          setBillDetails(details);
+              return null;
+            })
+          );
         } catch (error) {
           console.error('Error parsing stored bills:', error);
         }
@@ -165,11 +194,13 @@ export default function Home() {
       }
 
       // Check auth state
-      const supabase = createClient();
-      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const { data: { user: authUser } } = await authPromise;
       if (authUser) {
         setUser({ id: authUser.id, email: authUser.email || '' });
+      }
+      setAuthChecked(true);
 
+      if (authUser) {
         fetchGroups();
 
         // Fetch server-side bills
@@ -187,6 +218,13 @@ export default function Home() {
           setShowClaimPrompt(true);
         }
       }
+
+      const results = await detailsPromise;
+      const details: Record<string, BillWithParticipants> = {};
+      results.forEach(result => {
+        if (result) details[result.id] = result.data;
+      });
+      setBillDetails(details);
 
       setIsLoading(false);
     };
@@ -306,161 +344,134 @@ export default function Home() {
   const hiddenBills = allBills.filter(bill => hiddenBillIds.has(bill.id));
   const displayedBills = showHidden ? allBills : visibleBills;
 
+  const billList = (
+    <>
+      {displayedBills.length > 0 && (
+        <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
+          {displayedBills.map((bill) => {
+            const details = billDetails[bill.id];
+            const status = details?.status ?? bill.status;
+            const isHidden = hiddenBillIds.has(bill.id);
+            return (
+              <BillRow
+                key={bill.id}
+                id={bill.id}
+                name={bill.name}
+                createdAt={bill.created_at}
+                status={status !== 'draft' ? status : undefined}
+                peopleCount={details ? details.participants?.length || 0 : undefined}
+                total={details ? billTotal(details) : storedBillTotal(bill)}
+                role={bill.role === 'creator' ? 'Host' : 'Joined'}
+                archived={isHidden}
+                action={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-white/40 hover:text-white hover:bg-white/[0.06]"
+                    onClick={(e) => (isHidden ? handleUnhideBill(e, bill.id) : handleHideBill(e, bill.id))}
+                    title={isHidden ? 'Restore bill' : 'Archive bill'}
+                    aria-label={isHidden ? 'Restore bill' : 'Archive bill'}
+                  >
+                    {isHidden ? <Eye /> : <X />}
+                  </Button>
+                }
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {/* Empty state when all bills are hidden */}
+      {visibleBills.length === 0 && hiddenBills.length > 0 && !showHidden && (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-8 text-center text-white/40">
+          <p>All bills are archived.</p>
+          <Button
+            variant="link"
+            onClick={() => setShowHidden(true)}
+            className="text-white/60 hover:text-white"
+          >
+            Show archived bills
+          </Button>
+        </div>
+      )}
+
+      {/* Show hidden toggle */}
+      {hiddenBills.length > 0 && (
+        <div className="mt-3 -ml-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowHidden(!showHidden)}
+            className="text-white/50 hover:text-white hover:bg-white/[0.06]"
+          >
+            {showHidden ? <EyeOff /> : <Eye />}
+            {showHidden ? 'Hide' : 'Show'} {hiddenBills.length} archived bill{hiddenBills.length > 1 ? 's' : ''}
+          </Button>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <main className="relative min-h-dvh">
-      <div className="container mx-auto px-4 pt-6 pb-16 sm:pt-10">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+        <SiteNav user={authChecked ? user : undefined} onSignOut={handleSignOut} />
 
-        {/* Nav */}
-        <div className="flex justify-end mb-8">
-          {user ? (
-            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-4 py-2 backdrop-blur-sm">
-              <Link href="/profile" className="text-sm text-white/60 hover:text-white transition-smooth">
-                {user.email}
-              </Link>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleSignOut}
-                className="text-white/60 hover:text-white h-9 px-2"
-              >
-                Sign out
-              </Button>
-            </div>
-          ) : (
-            <Link href="/signin">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-white/60 hover:text-white rounded-full"
-              >
-                Sign in
-              </Button>
-            </Link>
-          )}
-        </div>
-
-        {/* Hero Section */}
-        <div className="relative text-center mb-16">
-          <div className="relative z-10">
-            <div className="inline-flex items-center gap-2 bg-white/5 backdrop-blur-sm text-white/60 px-4 py-2 rounded-full text-sm font-medium mb-8 border border-white/10">
-              No app download needed
-            </div>
-            <h1 className="text-6xl sm:text-7xl md:text-8xl font-bold mb-6 tracking-tight">
-              <span className="text-white">Split bills.</span>
-              <br />
-              <span className="bg-gradient-to-r from-emerald-300 via-green-400 to-lime-300 bg-clip-text text-transparent">
-                Effortlessly.
-              </span>
-            </h1>
-            <p className="text-lg sm:text-xl text-white/50 mb-10 max-w-xl mx-auto leading-relaxed font-light">
-              Scan your receipt. Share with the group.
-              <br className="hidden sm:block" />
-              Everyone picks what they ordered.
-            </p>
-            <div className="flex gap-4 justify-center flex-wrap">
-              <Link href="/create">
-                <Button size="lg" className="text-lg px-8 bg-white text-black hover:bg-white/90 transition-smooth hover:scale-105 rounded-full">
-                  <Receipt className="mr-2 h-5 w-5" />
-                  Split a Bill
-                </Button>
-              </Link>
-              <Link href="/join">
-                <Button size="lg" variant="outline" className="text-lg px-8 transition-smooth hover:scale-105 rounded-full border-white/20 text-white hover:bg-white/10">
-                  <Users className="mr-2 h-5 w-5" />
-                  Join a Bill
-                </Button>
-              </Link>
-            </div>
+        {!authChecked ? (
+          <div className="max-w-3xl pt-12 pb-24">
+            <BillListSkeleton rows={3} />
           </div>
-        </div>
+        ) : user ? (
+          /* Signed-in: a dashboard, not a landing */
+          <div className="max-w-3xl pt-10 pb-24 sm:pt-14">
+            <section className="animate-slide-up">
+              <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <h1 className="text-3xl font-semibold tracking-tight text-white md:text-4xl">Your Bills</h1>
+                <div className="flex shrink-0 gap-2">
+                  <Button asChild>
+                    <Link href="/create">Split a Bill</Link>
+                  </Button>
+                  <Button
+                    asChild
+                    variant="ghost"
+                    className="border border-white/10 text-white hover:bg-white/[0.06] hover:text-white"
+                  >
+                    <Link href="/join">Join a Bill</Link>
+                  </Button>
+                </div>
+              </div>
 
-        {/* My Bills Section */}
-        {!isLoading && allBills.length > 0 && (
-          <div className="mb-16 animate-slide-up">
-            <h2 className="text-3xl font-semibold text-center mb-6 text-white">Your Bills</h2>
+              {isLoading ? (
+                <BillListSkeleton />
+              ) : allBills.length > 0 ? (
+                billList
+              ) : (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-5 py-8 text-sm text-white/45">
+                  No bills yet. Split one after your next dinner and it will show up here.
+                </div>
+              )}
+            </section>
 
-            {/* Show hidden toggle */}
-            {hiddenBills.length > 0 && (
-              <div className="flex justify-center mb-4">
+            <section className="mt-16 border-t border-white/10 pt-10 animate-slide-up">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 className="text-xl font-semibold tracking-tight text-white">Your Groups</h2>
+                  <p className="mt-1 text-sm text-white/40">
+                    Keep recurring bills together for roommates, trips and events.
+                  </p>
+                </div>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setShowHidden(!showHidden)}
-                  className="text-white/60 hover:text-white hover:bg-white/[0.06]"
+                  onClick={() => setShowCreateGroup(true)}
+                  className="-mr-2 shrink-0 text-white/60 hover:text-white hover:bg-white/[0.06]"
                 >
-                  {showHidden ? <EyeOff /> : <Eye />}
-                  {showHidden ? 'Hide' : 'Show'} {hiddenBills.length} archived bill{hiddenBills.length > 1 ? 's' : ''}
+                  <Plus />
+                  New group
                 </Button>
               </div>
-            )}
-
-            {displayedBills.length > 0 && (
-              <div className="max-w-2xl mx-auto divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
-                {displayedBills.map((bill) => {
-                  const details = billDetails[bill.id];
-                  const status = details?.status ?? bill.status;
-                  const isHidden = hiddenBillIds.has(bill.id);
-                  return (
-                    <BillRow
-                      key={bill.id}
-                      id={bill.id}
-                      name={bill.name}
-                      createdAt={bill.created_at}
-                      status={status !== 'draft' ? status : undefined}
-                      peopleCount={details ? details.participants?.length || 0 : undefined}
-                      total={details ? billTotal(details) : storedBillTotal(bill)}
-                      role={bill.role === 'creator' ? 'Host' : 'Joined'}
-                      archived={isHidden}
-                      action={
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-white/40 hover:text-white hover:bg-white/[0.06]"
-                          onClick={(e) => (isHidden ? handleUnhideBill(e, bill.id) : handleHideBill(e, bill.id))}
-                          title={isHidden ? 'Restore bill' : 'Archive bill'}
-                          aria-label={isHidden ? 'Restore bill' : 'Archive bill'}
-                        >
-                          {isHidden ? <Eye /> : <X />}
-                        </Button>
-                      }
-                    />
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Empty state when all bills are hidden */}
-            {visibleBills.length === 0 && hiddenBills.length > 0 && !showHidden && (
-              <div className="text-center py-8 text-white/40">
-                <p>All bills are archived.</p>
-                <Button
-                  variant="link"
-                  onClick={() => setShowHidden(true)}
-                  className="text-white/60 hover:text-white"
-                >
-                  Show archived bills
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {isLoading && allBills.length === 0 && (
-          <div className="flex justify-center mb-16">
-            <Loader2 className="h-6 w-6 animate-spin text-white/40" />
-          </div>
-        )}
-
-        {/* Groups Section (signed-in only) */}
-        {user && (
-          <div className="mb-16 animate-slide-up">
-            <h2 className="text-3xl font-semibold text-center mb-2 text-white">Your Groups</h2>
-            <p className="text-center text-white/40 text-sm mb-6">
-              Roommates, trips, events — keep recurring bills together.
-            </p>
-            <div className="max-w-2xl mx-auto">
               {groups.length > 0 && (
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {groups.map((group) => (
                     <GroupCard
                       key={group.id}
@@ -474,113 +485,29 @@ export default function Home() {
                   ))}
                 </div>
               )}
-              <div className="mt-4 flex justify-center">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowCreateGroup(true)}
-                  className="text-white/60 hover:text-white hover:bg-white/[0.06]"
-                >
-                  <Plus />
-                  New group
-                </Button>
-              </div>
-            </div>
+            </section>
           </div>
+        ) : (
+          /* Signed-out: the landing */
+          <>
+            <Hero />
+
+            {/* Bills saved on this device */}
+            {(isLoading ? myBills.length > 0 : allBills.length > 0) && (
+              <section className="max-w-2xl pb-24 animate-slide-up">
+                <h2 className="mb-5 text-xl font-semibold tracking-tight text-white">Your Bills</h2>
+                {isLoading ? <BillListSkeleton rows={Math.min(myBills.length, 3)} /> : billList}
+              </section>
+            )}
+
+            <HowItWorks />
+            <WhySplittr />
+            <GroupsStatement />
+            <ClosingCta />
+          </>
         )}
 
-        {/* How it Works */}
-        <div className="mb-16">
-          <h2 className="text-3xl font-semibold text-center mb-8 text-white">How <span className="bg-gradient-to-r from-emerald-300 to-green-400 bg-clip-text text-transparent">It Works</span></h2>
-          <div className="grid md:grid-cols-4 gap-6">
-            <Card className="shadow-sm transition-smooth hover:shadow-md bg-white/5 border-white/10 backdrop-blur-sm">
-              <CardHeader>
-                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-2">
-                  <Receipt className="h-6 w-6 text-green-400" />
-                </div>
-                <CardTitle className="text-lg text-white">1. Scan Receipt</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>
-                  Take a photo of your receipt. Our AI extracts all the items automatically.
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-sm transition-smooth hover:shadow-md bg-white/5 border-white/10 backdrop-blur-sm">
-              <CardHeader>
-                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-2">
-                  <Share2 className="h-6 w-6 text-emerald-300" />
-                </div>
-                <CardTitle className="text-lg text-white">2. Share Link</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>
-                  Get a shareable link or code. Send it to everyone who was at the table.
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-sm transition-smooth hover:shadow-md bg-white/5 border-white/10 backdrop-blur-sm">
-              <CardHeader>
-                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-2">
-                  <Users className="h-6 w-6 text-lime-300" />
-                </div>
-                <CardTitle className="text-lg text-white">3. Claim Items</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>
-                  Everyone taps what they ordered. Shared items split automatically.
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-sm transition-smooth hover:shadow-md bg-white/5 border-white/10 backdrop-blur-sm">
-              <CardHeader>
-                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-2">
-                  <Calculator className="h-6 w-6 text-green-400" />
-                </div>
-                <CardTitle className="text-lg text-white">4. See Your Share</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription>
-                  Tax and tip are split fairly. Everyone sees exactly what they owe.
-                </CardDescription>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Features */}
-        <div className="text-center">
-          <h2 className="text-3xl font-semibold mb-8 text-white">Why <span className="bg-gradient-to-r from-green-400 to-lime-300 bg-clip-text text-transparent">Splittr</span>?</h2>
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
-            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
-              <h3 className="font-semibold mb-2 text-lg text-white">No App Download</h3>
-              <p className="text-white/40">
-                Works right in the browser. Just share a link.
-              </p>
-            </div>
-            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
-              <h3 className="font-semibold mb-2 text-lg text-white">Split Any Way</h3>
-              <p className="text-white/40">
-                By item, evenly, or custom amounts — tax and tip stay fair.
-              </p>
-            </div>
-            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
-              <h3 className="font-semibold mb-2 text-lg text-white flex items-center justify-center gap-2"><Wallet className="h-5 w-5 text-green-400" />Settle Up Fast</h3>
-              <p className="text-white/40">
-                One-tap Venmo, Cash App, and PayPal links for each share, plus Zelle.
-              </p>
-            </div>
-            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
-              <h3 className="font-semibold mb-2 text-lg text-white">Real-time Updates</h3>
-              <p className="text-white/40">
-                See when others claim items or pay up, instantly.
-              </p>
-            </div>
-          </div>
-        </div>
+        {authChecked && <SiteFooter signedIn={!!user} />}
       </div>
 
       {/* Create group dialog */}

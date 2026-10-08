@@ -48,7 +48,7 @@
 
 :root {
   --radius: 0.875rem;
-  --background: oklch(0.00 0 0);
+  --background: oklch(0.13 0.004 260);
   --foreground: oklch(0.98 0.005 0);
   --card: oklch(0.10 0.005 260);
   --card-foreground: oklch(0.98 0.005 0);
@@ -82,7 +82,7 @@
 }
 
 .dark {
-  --background: oklch(0.00 0 0);
+  --background: oklch(0.13 0.004 260);
   --foreground: oklch(0.98 0.005 0);
   --card: oklch(0.10 0.005 260);
   --card-foreground: oklch(0.98 0.005 0);
@@ -122,7 +122,7 @@
   html {
     /* The overscroll/rubber-band canvas must match the app background,
        and bouncing past the page edges just exposes it — disable that. */
-    background-color: #000;
+    background-color: #0b0b0d;
     overscroll-behavior-y: none;
     height: 100%;
   }
