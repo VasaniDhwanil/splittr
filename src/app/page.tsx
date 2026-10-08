@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Bill, Participant } from '@/types';
 import { createClient } from '@/lib/supabase/client';
+import { billTotal } from '@/lib/calculations';
 import { toast } from 'sonner';
 import { GroupCard } from '@/components/groups/group-card';
 import { GroupDialog } from '@/components/groups/group-dialog';
@@ -28,6 +29,19 @@ interface StoredBill {
   short_code: string;
   created_at: string;
   role: 'creator' | 'participant';
+  // Only present on bills from /api/bills/mine (account bills), so a bill that
+  // is not in this browser's localStorage can still show its status and total.
+  status?: Bill['status'];
+  subtotal?: number;
+  tax?: number;
+  tip_amount?: number;
+}
+
+type MineBillRow = Pick<Bill, 'id' | 'name' | 'short_code' | 'status' | 'subtotal' | 'tax' | 'tip_amount' | 'created_at'>;
+
+function storedBillTotal(bill: StoredBill): number | undefined {
+  if (bill.subtotal === undefined) return undefined;
+  return bill.subtotal + (bill.tax ?? 0) + (bill.tip_amount ?? 0);
 }
 
 interface BillWithParticipants extends Bill {
@@ -87,14 +101,18 @@ export default function Home() {
   const fetchServerBills = async () => {
     const res = await fetch('/api/bills/mine');
     if (res.ok) {
-      const serverData = await res.json();
+      const serverData: MineBillRow[] = await res.json();
       setServerBills(
-        serverData.map((b: { id: string; name: string; short_code: string; created_at: string }) => ({
+        serverData.map((b) => ({
           id: b.id,
           name: b.name,
           short_code: b.short_code,
           created_at: b.created_at,
           role: 'creator' as const,
+          status: b.status,
+          subtotal: b.subtotal,
+          tax: b.tax,
+          tip_amount: b.tip_amount,
         }))
       );
     }
@@ -155,19 +173,7 @@ export default function Home() {
         fetchGroups();
 
         // Fetch server-side bills
-        const res = await fetch('/api/bills/mine');
-        if (res.ok) {
-          const serverData = await res.json();
-          setServerBills(
-            serverData.map((b: { id: string; name: string; short_code: string; created_at: string }) => ({
-              id: b.id,
-              name: b.name,
-              short_code: b.short_code,
-              created_at: b.created_at,
-              role: 'creator' as const,
-            }))
-          );
-        }
+        await fetchServerBills();
 
         // Check if there are unclaimed bills to prompt about
         const alreadyClaimed = JSON.parse(localStorage.getItem('splittr-claimed-bills') || '[]');
@@ -392,6 +398,7 @@ export default function Home() {
               <div className="max-w-2xl mx-auto divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
                 {displayedBills.map((bill) => {
                   const details = billDetails[bill.id];
+                  const status = details?.status ?? bill.status;
                   const isHidden = hiddenBillIds.has(bill.id);
                   return (
                     <BillRow
@@ -399,9 +406,9 @@ export default function Home() {
                       id={bill.id}
                       name={bill.name}
                       createdAt={bill.created_at}
-                      status={details && details.status !== 'draft' ? details.status : undefined}
+                      status={status !== 'draft' ? status : undefined}
                       peopleCount={details ? details.participants?.length || 0 : undefined}
-                      total={details ? details.subtotal + details.tax + details.tip_amount : undefined}
+                      total={details ? billTotal(details) : storedBillTotal(bill)}
                       role={bill.role === 'creator' ? 'Host' : 'Joined'}
                       archived={isHidden}
                       action={

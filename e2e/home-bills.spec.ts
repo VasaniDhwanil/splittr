@@ -81,4 +81,35 @@ test.describe('home bills list (writes)', () => {
     await row.getByRole('button', { name: 'Restore bill' }).click();
     await expect(row).not.toContainText('Archived');
   });
+
+  // A bill that exists only on the account (e.g. created on another device):
+  // it is not in this browser's splittr-my-bills, so home gets it solely from
+  // /api/bills/mine and must still render its total.
+  test('bill row shows name, Host and total without a localStorage entry', async ({ page }) => {
+    const b = bill!;
+
+    // Make sure this browser does not know the bill locally, whatever the
+    // saved storage state holds, so the row can only come from /api/bills/mine.
+    await page.addInitScript((id) => {
+      try {
+        const key = 'splittr-my-bills';
+        const list = JSON.parse(localStorage.getItem(key) || '[]') as { id: string }[];
+        localStorage.setItem(key, JSON.stringify(list.filter((x) => x.id !== id)));
+      } catch {
+        /* storage unavailable: nothing to strip */
+      }
+    }, b.id);
+
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Your Bills' })).toBeVisible();
+
+    const link = page.locator(`a[href="/bill/${b.id}"]`);
+    const row = link.locator(
+      'xpath=ancestor::div[.//button[@aria-label="Archive bill" or @aria-label="Restore bill"]][1]'
+    );
+
+    await expect(link).toHaveText(billName);
+    await expect(row).toContainText('Host');
+    await expect(row).toContainText(total);
+  });
 });
