@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { useReducedMotion } from "framer-motion";
 import { Aurora } from "./background-paths";
 import { FloatingPaths } from "./floating-paths";
@@ -11,8 +12,14 @@ const GRAIN =
 // Light first (the aurora), then a faint field of slow, flowing lines over it,
 // at roughly a third of the intensity the lines used to have on their own.
 // Reduced motion keeps everything but holds the lines still.
+// The server cannot know the motion preference, so the first client render must
+// match it (animated). Only after mount do we switch to the still version.
+const noop = () => () => {};
+const useMounted = () => useSyncExternalStore(noop, () => true, () => false);
+
 export function AnimatedBackground() {
-  const reduceMotion = useReducedMotion();
+  const mounted = useMounted();
+  const reduceMotion = useReducedMotion() && mounted;
 
   return (
     <div className="fixed top-0 left-0 w-full h-[100lvh] pointer-events-none z-0">
