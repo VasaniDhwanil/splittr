@@ -3,16 +3,23 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
-import { Camera, Upload, Plus, Trash2, ArrowLeft, Loader2, ReceiptText, Divide, SlidersHorizontal, Wallet, Users } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronUp, Loader2, Plus } from 'lucide-react';
 import { formatCurrency } from '@/lib/calculations';
 import { ScannedReceipt, SplitMode, TipSplit } from '@/types';
 import { createClient } from '@/lib/supabase/client';
+import { AvatarInitials } from '@/components/avatar-initials';
+import { StepIndicator } from '@/components/create/step-indicator';
+import { StepSurface, StepActions } from '@/components/create/step-surface';
+import { ReceiptPicker } from '@/components/create/receipt-picker';
+import { ItemRow } from '@/components/create/item-row';
+import { Segmented } from '@/components/create/segmented';
+import { ChoicePill } from '@/components/create/choice-pill';
+import { Field, FIELD_INPUT, FIELD_LABEL } from '@/components/create/field';
+import { SummaryRow } from '@/components/create/summary-row';
 
 interface BillItem {
   name: string;
@@ -26,11 +33,32 @@ interface GroupOption {
   emoji: string;
 }
 
-const SPLIT_MODES: { key: SplitMode; label: string; description: string; icon: typeof ReceiptText }[] = [
-  { key: 'items', label: 'By item', description: 'Everyone taps what they ordered', icon: ReceiptText },
-  { key: 'even', label: 'Evenly', description: 'Total divided equally', icon: Divide },
-  { key: 'custom', label: 'Custom', description: 'You assign each amount', icon: SlidersHorizontal },
+const SPLIT_MODES: { key: SplitMode; label: string; description: string }[] = [
+  { key: 'items', label: 'By item', description: 'Everyone taps what they ordered' },
+  { key: 'even', label: 'Evenly', description: 'Total divided equally' },
+  { key: 'custom', label: 'Custom', description: 'You assign each amount' },
 ];
+
+const SPLIT_MODE_OPTIONS = SPLIT_MODES.map((mode) => ({ value: mode.key, label: mode.label }));
+
+const TIP_SPLIT_OPTIONS: { value: TipSplit; label: string }[] = [
+  { value: 'proportional', label: 'Like items' },
+  { value: 'even', label: 'Equally' },
+];
+
+const TIP_SPLIT_HELP: Record<TipSplit, string> = {
+  proportional: 'Each person tips on what they ordered.',
+  even: 'Everyone chips in the same tip.',
+};
+
+const TIP_PERCENTS = [0, 15, 18, 20, 25];
+const TIP_PERCENT_OPTIONS = TIP_PERCENTS.map((pct) => ({ value: String(pct), label: `${pct}%` }));
+
+const STEP_ORDER = ['upload', 'review', 'details'] as const;
+const STEP_LABELS = ['Receipt', 'Items', 'Details'] as const;
+
+const NO_SPIN =
+  '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
 
 export default function CreatePage() {
   const router = useRouter();
@@ -65,6 +93,9 @@ export default function CreatePage() {
   const tipAmount =
     customTip !== '' ? Math.max(0, parseFloat(customTip) || 0) : (subtotal + tax) * (tipPercent / 100);
   const total = subtotal + tax + tipAmount;
+
+  const reduceMotion = useReducedMotion();
+  const stepIndex = STEP_ORDER.indexOf(step);
 
   // Prefill payment handles from the last bill; load groups if signed in
   useEffect(() => {
@@ -139,13 +170,13 @@ export default function CreatePage() {
         const body = await response.json().catch(() => ({}));
         if (response.status === 422 || body.code === 'not_a_receipt') {
           toast.error("That doesn't look like a receipt 🧾", {
-            description: 'Try a clearer photo of the bill — or enter the items manually below.',
+            description: 'Try a clearer photo of the bill, or enter the items manually below.',
           });
           return;
         }
         if (response.status === 429) {
           toast.error('Slow down a sec ⏳', {
-            description: body.error || 'Too many scans — try again in a few minutes.',
+            description: body.error || 'Too many scans. Try again in a few minutes.',
           });
           return;
         }
@@ -283,466 +314,362 @@ export default function CreatePage() {
     }
   };
 
+
+  const handleTakePhoto = () => fileInputRef.current?.click();
+
+  const handleUploadPhoto = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.removeAttribute('capture');
+      fileInputRef.current.click();
+      fileInputRef.current.setAttribute('capture', 'environment');
+    }
+  };
+
+  const selectedMode = SPLIT_MODES.find((mode) => mode.key === splitMode);
+
   return (
     <main className="min-h-dvh py-8">
-      <div className="container mx-auto px-4 max-w-2xl">
-        <Link href="/" className="inline-flex items-center text-white/40 hover:text-white mb-6 transition-smooth">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Home
+      <div className="container mx-auto max-w-2xl px-4">
+        <Link
+          href="/"
+          className="mb-8 inline-flex h-11 items-center gap-2 text-sm text-white/40 transition-colors hover:text-white"
+        >
+          <ArrowLeft className="size-4" />
+          Back to home
         </Link>
 
-        <h1 className="text-3xl font-bold mb-8 text-white">Create a <span className="bg-gradient-to-r from-emerald-300 to-green-400 bg-clip-text text-transparent">Bill</span></h1>
+        <header className="space-y-6">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Split a bill</h1>
+            <p className="mt-2 text-sm text-white/40">Scan the receipt, check the items, then share one link.</p>
+          </div>
+          <StepIndicator steps={STEP_LABELS} current={stepIndex} />
+        </header>
 
-        {/* Step 1: Upload */}
-        {step === 'upload' && (
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>Scan Your Receipt</CardTitle>
-              <CardDescription>
-                Take a photo or upload an image of your receipt. We&apos;ll extract all the items automatically.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileSelect}
+          className="hidden"
+        />
 
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isScanning}
-                  className="flex flex-col items-center justify-center gap-3 h-36 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-primary/40 transition-smooth touch-manipulation active:scale-[0.98] disabled:opacity-60"
-                >
-                  <span className="w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center">
-                    {isScanning ? (
-                      <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                    ) : (
-                      <Camera className="h-6 w-6 text-primary" />
-                    )}
-                  </span>
-                  <span className="font-semibold text-sm">
-                    {isScanning ? 'Scanning…' : 'Take Photo'}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (fileInputRef.current) {
-                      fileInputRef.current.removeAttribute('capture');
-                      fileInputRef.current.click();
-                      fileInputRef.current.setAttribute('capture', 'environment');
-                    }
-                  }}
-                  disabled={isScanning}
-                  className="flex flex-col items-center justify-center gap-3 h-36 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-primary/40 transition-smooth touch-manipulation active:scale-[0.98] disabled:opacity-60"
-                >
-                  <span className="w-12 h-12 rounded-full bg-primary/15 flex items-center justify-center">
-                    <Upload className="h-6 w-6 text-primary" />
-                  </span>
-                  <span className="font-semibold text-sm">Upload Image</span>
-                </button>
-              </div>
-
-              <Separator className="my-6" />
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Button variant="outline" onClick={() => setStep('review')}>
-                  Enter items manually
-                </Button>
-                <Button variant="outline" onClick={handleTotalOnly}>
-                  <Divide className="h-4 w-4 mr-2" />
-                  Just split a total
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Step 2: Review Items */}
-        {step === 'review' && (
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>Review Items</CardTitle>
-              <CardDescription>
-                Check the items below and make any corrections needed.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Column headers */}
-              {items.length > 0 && (
-                <div className="flex gap-1 sm:gap-2 items-center text-xs text-muted-foreground">
-                  <div className="flex-1 min-w-0">Item</div>
-                  <div className="w-12 sm:w-16 text-center">Qty</div>
-                  <div className="w-16 sm:w-24 text-center">Each $</div>
-                  <div className="hidden sm:block w-20 text-right">Total</div>
-                  <div className="w-9"></div>
-                </div>
+        <div className="mt-8">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={step}
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+              transition={{ duration: reduceMotion ? 0 : 0.2, ease: 'easeOut' }}
+            >
+              {/* Step 1: Receipt */}
+              {step === 'upload' && (
+                <StepSurface>
+                  <ReceiptPicker
+                    isScanning={isScanning}
+                    onTakePhoto={handleTakePhoto}
+                    onUploadPhoto={handleUploadPhoto}
+                    onEnterByHand={() => setStep('review')}
+                    onTotalOnly={handleTotalOnly}
+                  />
+                </StepSurface>
               )}
-              {items.map((item, index) => (
-                <div key={index} className="flex gap-1 sm:gap-2 items-center">
-                  <div className="flex-1 min-w-0">
-                    <Input
-                      placeholder="Item name"
-                      value={item.name}
-                      onChange={(e) => handleUpdateItem(index, 'name', e.target.value)}
-                      className="text-sm"
-                    />
-                  </div>
-                  <div className="w-12 sm:w-16 shrink-0">
-                    <Input
-                      type="number"
-                      placeholder="Qty"
-                      min="1"
-                      value={item.quantity}
-                      onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
-                      className="text-center text-sm"
-                    />
-                  </div>
-                  <div className="w-16 sm:w-24 shrink-0">
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={item.price || ''}
-                      onChange={(e) => handleUpdateItem(index, 'price', e.target.value)}
-                      className="text-sm"
-                    />
-                  </div>
-                  <div className="hidden sm:block w-20 text-right text-sm font-medium shrink-0">
-                    {formatCurrency(item.price * item.quantity)}
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleRemoveItem(index)}
-                    className="shrink-0"
-                  >
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </div>
-              ))}
 
-              <Button variant="outline" onClick={handleAddItem} className="w-full">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Item
-              </Button>
-
-              <Separator className="my-4" />
-
-              <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span>Subtotal</span>
-                  <span>{formatCurrency(subtotal)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <Label htmlFor="tax">Tax</Label>
-                  <div className="w-24">
-                    <Input
-                      id="tax"
-                      type="number"
-                      step="0.01"
-                      value={tax || ''}
-                      onChange={(e) => setTax(parseFloat(e.target.value) || 0)}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-between items-center gap-2 flex-wrap">
-                  <Label htmlFor="tip">Tip</Label>
-                  <div className="flex gap-2 flex-wrap justify-end items-center">
-                    {[0, 15, 18, 20, 25].map((pct) => (
-                      <Button
-                        key={pct}
-                        size="sm"
-                        variant={customTip === '' && tipPercent === pct ? 'default' : 'outline'}
-                        onClick={() => {
-                          setCustomTip('');
-                          setTipPercent(pct);
-                        }}
-                      >
-                        {pct}%
-                      </Button>
-                    ))}
-                    <div className="relative">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="0.01"
-                        placeholder="exact"
-                        value={customTip}
-                        onChange={(e) => setCustomTip(e.target.value)}
-                        className="h-9 w-24 pl-6"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span>Tip Amount</span>
-                  <span>{formatCurrency(tipAmount)}</span>
-                </div>
-                {tipAmount > 0 && (
-                  <div className="flex justify-between items-center gap-2 flex-wrap">
-                    <Label>Tip split</Label>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant={tipSplit === 'proportional' ? 'default' : 'outline'}
-                        onClick={() => setTipSplit('proportional')}
-                      >
-                        Like items
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={tipSplit === 'even' ? 'default' : 'outline'}
-                        onClick={() => setTipSplit('even')}
-                      >
-                        Equally
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                <Separator />
-                <div className="flex justify-between font-bold text-lg">
-                  <span>Total</span>
-                  <span>{formatCurrency(total)}</span>
-                </div>
-              </div>
-
-              <div className="flex gap-4 pt-4">
-                <Button variant="outline" onClick={() => setStep('upload')}>
-                  Back
-                </Button>
-                <Button className="flex-1" onClick={() => setStep('details')}>
-                  Continue
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Step 3: Bill Details */}
-        {step === 'details' && (
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>Bill Details</CardTitle>
-              <CardDescription>
-                Give your bill a name, choose how to split, and add how friends can pay you back.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="space-y-2">
-                <Label htmlFor="billName">Bill Name</Label>
-                <Input
-                  id="billName"
-                  placeholder="e.g., Dinner at Joe's"
-                  value={billName}
-                  onChange={(e) => setBillName(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="creatorName">Your Name</Label>
-                <Input
-                  id="creatorName"
-                  placeholder="Enter your name"
-                  value={creatorName}
-                  onChange={(e) => setCreatorName(e.target.value)}
-                />
-              </div>
-
-              {/* Split mode */}
-              <div className="space-y-2">
-                <Label>How should this split?</Label>
-                <div className="grid grid-cols-3 gap-2">
-                  {SPLIT_MODES.map((mode) => {
-                    const Icon = mode.icon;
-                    const selected = splitMode === mode.key;
-                    return (
-                      <button
-                        key={mode.key}
-                        type="button"
-                        onClick={() => setSplitMode(mode.key)}
-                        className={`p-3 rounded-xl border-2 text-left transition-smooth ${
-                          selected
-                            ? 'border-primary/60 bg-primary/10'
-                            : 'border-white/10 bg-white/5 hover:bg-white/10'
-                        }`}
-                      >
-                        <Icon className={`h-4 w-4 mb-1 ${selected ? 'text-primary' : 'text-white/40'}`} />
-                        <div className="text-sm font-medium">{mode.label}</div>
-                        <div className="text-xs text-muted-foreground leading-tight mt-0.5">{mode.description}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Group assignment */}
-              {groups.length > 0 && (
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <Users className="h-4 w-4 text-white/40" />
-                    Add to a group (optional)
-                  </Label>
-                  <div className="flex flex-wrap gap-2">
-                    {groups.map((group) => (
-                      <button
-                        key={group.id}
-                        type="button"
-                        onClick={() => setSelectedGroupId(selectedGroupId === group.id ? null : group.id)}
-                        className={`px-3 py-1.5 rounded-full text-sm border transition-smooth ${
-                          selectedGroupId === group.id
-                            ? 'border-primary/60 bg-primary/10 text-white'
-                            : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
-                        }`}
-                      >
-                        {group.name}
-                      </button>
-                    ))}
-                  </div>
-                  {selectedGroupId && groupMembers.length > 1 && (
-                    <div className="pt-2 space-y-2">
-                      <Label className="text-white/60 text-sm">Who paid?</Label>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setPaidByUserId(null)}
-                          className={`px-3 py-1.5 rounded-full text-sm border transition-smooth ${
-                            paidByUserId === null
-                              ? 'border-primary/60 bg-primary/10 text-white'
-                              : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
-                          }`}
-                        >
-                          I paid
-                        </button>
-                        {groupMembers
-                          .filter((m) => m.user_id !== myUserId)
-                          .map((m) => (
-                            <button
-                              key={m.user_id}
-                              type="button"
-                              onClick={() => setPaidByUserId(m.user_id)}
-                              className={`px-3 py-1.5 rounded-full text-sm border transition-smooth ${
-                                paidByUserId === m.user_id
-                                  ? 'border-primary/60 bg-primary/10 text-white'
-                                  : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
-                              }`}
-                            >
-                              {m.display_name} paid
-                            </button>
+              {/* Step 2: Items */}
+              {step === 'review' && (
+                <StepSurface>
+                  <div>
+                    {items.length > 0 ? (
+                      <>
+                        <div className="-mx-2 hidden items-center gap-2 pb-1 text-xs text-white/35 sm:flex" aria-hidden>
+                          <span className="flex-1 px-2">Item</span>
+                          <span className="w-32 text-center">Qty</span>
+                          <span className="w-24 px-2 text-right">Each</span>
+                          <span className="w-10" />
+                        </div>
+                        <div className="-mx-2 divide-y divide-white/[0.06]">
+                          {items.map((item, index) => (
+                            <ItemRow
+                              key={index}
+                              item={item}
+                              index={index}
+                              onChange={(field, value) => handleUpdateItem(index, field, value)}
+                              onRemove={() => handleRemoveItem(index)}
+                            />
                           ))}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-white/40">No items yet. Add what was on the receipt.</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleAddItem}
+                      className="-ml-3 mt-2 inline-flex min-h-11 items-center gap-2 rounded-full px-3 text-sm font-medium text-white/60 outline-none transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-ring/50"
+                    >
+                      <Plus className="size-4" />
+                      Add item
+                    </button>
+                  </div>
+
+                  <div className="border-t border-white/10 pt-6">
+                    <div className="ml-auto w-full space-y-4 sm:max-w-sm">
+                      <SummaryRow label="Subtotal">{formatCurrency(subtotal)}</SummaryRow>
+                      <div className="flex items-center justify-between gap-4">
+                        <label htmlFor="tax" className="text-sm text-white/60">
+                          Tax
+                        </label>
+                        <Input
+                          id="tax"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={tax || ''}
+                          onChange={(e) => setTax(parseFloat(e.target.value) || 0)}
+                          className={`font-money w-28 text-right ${FIELD_INPUT} ${NO_SPIN}`}
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <p className="text-sm text-white/60">Tip</p>
+                        <Segmented
+                          ariaLabel="Tip percent"
+                          options={TIP_PERCENT_OPTIONS}
+                          value={customTip === '' ? String(tipPercent) : null}
+                          onChange={(pct) => {
+                            setCustomTip('');
+                            setTipPercent(Number(pct));
+                          }}
+                        />
+                        <div className="flex items-center justify-between gap-4">
+                          <label htmlFor="tip" className="text-xs text-white/35">
+                            Or an exact amount
+                          </label>
+                          <div className="relative">
+                            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-white/35">
+                              $
+                            </span>
+                            <Input
+                              id="tip"
+                              type="number"
+                              inputMode="decimal"
+                              min="0"
+                              step="0.01"
+                              placeholder="exact"
+                              value={customTip}
+                              onChange={(e) => setCustomTip(e.target.value)}
+                              className={`font-money w-28 pl-6 text-right ${FIELD_INPUT} ${NO_SPIN}`}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <SummaryRow label="Tip amount">{formatCurrency(tipAmount)}</SummaryRow>
+                      <div className="border-t border-white/10 pt-4">
+                        <SummaryRow label="Total" strong>
+                          {formatCurrency(total)}
+                        </SummaryRow>
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+
+                  <StepActions onBack={() => setStep('upload')}>
+                    <Button size="lg" className="w-full" onClick={() => setStep('details')}>
+                      Continue
+                    </Button>
+                  </StepActions>
+                </StepSurface>
               )}
 
-              {/* Payment handles */}
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => setShowPayment(!showPayment)}
-                  className="flex items-center gap-2 text-sm font-medium text-white/70 hover:text-white transition-smooth"
-                >
-                  <Wallet className="h-4 w-4" />
-                  How friends pay you back (optional)
-                  <span className="text-white/30">{showPayment ? '−' : '+'}</span>
-                </button>
-                {showPayment && (
-                  <div className="space-y-3 p-4 rounded-xl bg-white/5 border border-white/10">
-                    <p className="text-xs text-muted-foreground">
-                      Add your handles and everyone gets one-tap payment links for their exact share.
-                    </p>
-                    <div className="space-y-2">
-                      <Label htmlFor="venmo" className="text-xs">Venmo</Label>
-                      <Input
-                        id="venmo"
-                        placeholder="@your-venmo"
-                        value={venmoHandle}
-                        onChange={(e) => setVenmoHandle(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="cashapp" className="text-xs">Cash App</Label>
-                      <Input
-                        id="cashapp"
-                        placeholder="$yourcashtag"
-                        value={cashappHandle}
-                        onChange={(e) => setCashappHandle(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="paypal" className="text-xs">PayPal.Me</Label>
-                      <Input
-                        id="paypal"
-                        placeholder="yourpaypalme"
-                        value={paypalHandle}
-                        onChange={(e) => setPaypalHandle(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="zelle" className="text-xs">Zelle</Label>
-                      <Input
-                        id="zelle"
-                        placeholder="Email or US phone number"
-                        value={zelleHandle}
-                        onChange={(e) => setZelleHandle(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* Step 3: Details */}
+              {step === 'details' && (
+                <StepSurface>
+                  <Field htmlFor="billName" label="Bill name">
+                    <Input
+                      id="billName"
+                      placeholder="e.g., Dinner at Joe's"
+                      value={billName}
+                      onChange={(e) => setBillName(e.target.value)}
+                      autoComplete="off"
+                      className={FIELD_INPUT}
+                    />
+                  </Field>
 
-              <Separator className="my-4" />
+                  <Field htmlFor="creatorName" label="Your name" helper="Shown on the bill, so friends know it's you.">
+                    <div className="flex items-center gap-3">
+                      {creatorName.trim() && <AvatarInitials name={creatorName} size="lg" className="shrink-0" />}
+                      <Input
+                        id="creatorName"
+                        placeholder="Enter your name"
+                        value={creatorName}
+                        onChange={(e) => setCreatorName(e.target.value)}
+                        autoComplete="name"
+                        className={FIELD_INPUT}
+                      />
+                    </div>
+                  </Field>
 
-              <div className="bg-muted p-4 rounded-lg">
-                <h3 className="font-semibold mb-2">Bill Summary</h3>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span>{items.length} items</span>
-                    <span>{formatCurrency(subtotal)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Tax</span>
-                    <span>{formatCurrency(tax)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Tip {customTip !== '' ? '(exact)' : `(${tipPercent}%)`}</span>
-                    <span>{formatCurrency(tipAmount)}</span>
-                  </div>
-                  <Separator className="my-2" />
-                  <div className="flex justify-between font-bold">
-                    <span>Total</span>
-                    <span>{formatCurrency(total)}</span>
-                  </div>
-                </div>
-              </div>
+                  <div className="space-y-6 border-t border-white/10 pt-6">
+                    <Field label="How should this split?" helper={selectedMode?.description}>
+                      <Segmented
+                        ariaLabel="How should this split?"
+                        options={SPLIT_MODE_OPTIONS}
+                        value={splitMode}
+                        onChange={setSplitMode}
+                      />
+                    </Field>
 
-              <div className="flex gap-4 pt-4">
-                <Button variant="outline" onClick={() => setStep('review')}>
-                  Back
-                </Button>
-                <Button className="flex-1 transition-smooth hover:scale-105" onClick={handleCreateBill} disabled={isCreating}>
-                  {isCreating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    "Let's Split!"
+                    {tipAmount > 0 && (
+                      <Field label="Tip split" helper={TIP_SPLIT_HELP[tipSplit]}>
+                        <Segmented
+                          ariaLabel="Tip split"
+                          options={TIP_SPLIT_OPTIONS}
+                          value={tipSplit}
+                          onChange={setTipSplit}
+                        />
+                      </Field>
+                    )}
+                  </div>
+
+                  {groups.length > 0 && (
+                    <div className="space-y-6 border-t border-white/10 pt-6">
+                      <Field label="Add to a group (optional)">
+                        <div className="flex flex-wrap gap-2">
+                          {groups.map((group) => (
+                            <ChoicePill
+                              key={group.id}
+                              selected={selectedGroupId === group.id}
+                              onClick={() => setSelectedGroupId(selectedGroupId === group.id ? null : group.id)}
+                            >
+                              <span className="truncate">{group.name}</span>
+                            </ChoicePill>
+                          ))}
+                        </div>
+                      </Field>
+
+                      {selectedGroupId && groupMembers.length > 1 && (
+                        <Field label="Who paid?">
+                          <div className="flex flex-wrap gap-2">
+                            <ChoicePill selected={paidByUserId === null} onClick={() => setPaidByUserId(null)} className="pl-1.5">
+                              <AvatarInitials name={creatorName.trim() || 'Me'} size="md" className="shrink-0" />
+                              I paid
+                            </ChoicePill>
+                            {groupMembers
+                              .filter((m) => m.user_id !== myUserId)
+                              .map((m) => (
+                                <ChoicePill
+                                  key={m.user_id}
+                                  selected={paidByUserId === m.user_id}
+                                  onClick={() => setPaidByUserId(m.user_id)}
+                                  className="pl-1.5"
+                                >
+                                  <AvatarInitials name={m.display_name} size="md" className="shrink-0" />
+                                  <span className="truncate">{m.display_name} paid</span>
+                                </ChoicePill>
+                              ))}
+                          </div>
+                        </Field>
+                      )}
+                    </div>
                   )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+
+                  <div className="space-y-6 border-t border-white/10 pt-6">
+                    <div>
+                      <button
+                        type="button"
+                        aria-expanded={showPayment}
+                        onClick={() => setShowPayment(!showPayment)}
+                        className="-ml-3 inline-flex min-h-11 items-center gap-2 rounded-full px-3 text-left text-sm font-medium text-white/70 outline-none transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-ring/50"
+                      >
+                        How friends pay you back (optional)
+                        {showPayment ? (
+                          <ChevronUp className="size-4 text-white/35" />
+                        ) : (
+                          <ChevronDown className="size-4 text-white/35" />
+                        )}
+                      </button>
+                      <p className="text-xs text-white/35">
+                        Add your handles and everyone gets one-tap payment links for their exact share.
+                      </p>
+                    </div>
+                    {showPayment && (
+                      <>
+                        <Field htmlFor="venmo" label="Venmo" helper="Your Venmo username.">
+                          <Input
+                            id="venmo"
+                            placeholder="@your-venmo"
+                            value={venmoHandle}
+                            onChange={(e) => setVenmoHandle(e.target.value)}
+                            autoComplete="off"
+                            className={FIELD_INPUT}
+                          />
+                        </Field>
+                        <Field htmlFor="cashapp" label="Cash App" helper="Your $cashtag.">
+                          <Input
+                            id="cashapp"
+                            placeholder="$yourcashtag"
+                            value={cashappHandle}
+                            onChange={(e) => setCashappHandle(e.target.value)}
+                            autoComplete="off"
+                            className={FIELD_INPUT}
+                          />
+                        </Field>
+                        <Field htmlFor="paypal" label="PayPal.Me" helper="The name after paypal.me/ in your link.">
+                          <Input
+                            id="paypal"
+                            placeholder="yourpaypalme"
+                            value={paypalHandle}
+                            onChange={(e) => setPaypalHandle(e.target.value)}
+                            autoComplete="off"
+                            className={FIELD_INPUT}
+                          />
+                        </Field>
+                        <Field htmlFor="zelle" label="Zelle" helper="The email or phone your Zelle is enrolled with.">
+                          <Input
+                            id="zelle"
+                            placeholder="Email or US phone number"
+                            value={zelleHandle}
+                            onChange={(e) => setZelleHandle(e.target.value)}
+                            autoComplete="off"
+                            className={FIELD_INPUT}
+                          />
+                        </Field>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 border-t border-white/10 pt-6">
+                    <p className={FIELD_LABEL}>Bill summary</p>
+                    <SummaryRow label={`${items.length} ${items.length === 1 ? 'item' : 'items'}`}>{formatCurrency(subtotal)}</SummaryRow>
+                    <SummaryRow label="Tax">{formatCurrency(tax)}</SummaryRow>
+                    <SummaryRow label={`Tip ${customTip !== '' ? '(exact)' : `(${tipPercent}%)`}`}>
+                      {formatCurrency(tipAmount)}
+                    </SummaryRow>
+                    <div className="pt-1">
+                      <SummaryRow label="Total" strong>
+                        {formatCurrency(total)}
+                      </SummaryRow>
+                    </div>
+                  </div>
+
+                  <StepActions onBack={() => setStep('review')}>
+                    <Button size="lg" className="w-full" onClick={handleCreateBill} disabled={isCreating}>
+                      {isCreating ? (
+                        <>
+                          <Loader2 className="animate-spin" />
+                          Creating...
+                        </>
+                      ) : (
+                        'Create bill'
+                      )}
+                    </Button>
+                  </StepActions>
+                </StepSurface>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
       </div>
     </main>
   );
