@@ -10,19 +10,19 @@ const GRAIN =
 
 // Light first (the aurora), then a faint field of slow, flowing lines over it,
 // at roughly a third of the intensity the lines used to have on their own.
-// Reduced motion keeps the light and drops the lines, which only exist to move.
+// Reduced motion keeps everything but holds the lines still.
 export function AnimatedBackground() {
   const reduceMotion = useReducedMotion();
 
   return (
     <div className="fixed top-0 left-0 w-full h-[100lvh] pointer-events-none z-0">
       <Aurora />
-      {!reduceMotion && (
-        <div aria-hidden className="absolute inset-0 opacity-[0.12]">
-          <FloatingPaths position={1} />
-          <FloatingPaths position={-1} />
-        </div>
-      )}
+      {/* A touch stronger on phones, where the thin strokes read fainter on small
+          screens. Under reduced motion the lines stay but hold still. */}
+      <div aria-hidden className="absolute inset-0 opacity-[0.2] sm:opacity-[0.12]">
+        <FloatingPaths position={1} animate={!reduceMotion} />
+        <FloatingPaths position={-1} animate={!reduceMotion} />
+      </div>
       <div
         aria-hidden
         className="absolute inset-0 opacity-[0.035]"
