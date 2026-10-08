@@ -125,11 +125,13 @@ function isPageVisible() {
  */
 export function BillPreview({ className }: BillPreviewProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const inView = useInView(ref, { amount: 0.4 });
+  // Phones see the tall card a slice at a time, so start as soon as a sliver shows.
+  const inView = useInView(ref, { amount: 0.15 });
   const pageVisible = useSyncExternalStore(subscribeVisibility, isPageVisible, () => true);
   const reduceMotion = useReducedMotion();
   const [animatedPhase, setAnimatedPhase] = useState<Phase>(0);
-  const looping = inView && pageVisible && !reduceMotion;
+  // Reduced motion keeps the story going but with fades only: no travel, no scaling.
+  const looping = inView && pageVisible;
 
   useEffect(() => {
     if (!looping) return;
@@ -148,7 +150,7 @@ export function BillPreview({ className }: BillPreviewProps) {
     };
   }, [looping]);
 
-  const phase: Phase = reduceMotion ? 2 : animatedPhase;
+  const phase: Phase = animatedPhase;
   const share = shareFor(phase);
   const myHex = hexFor(ME);
 
@@ -213,9 +215,9 @@ export function BillPreview({ className }: BillPreviewProps) {
                         <motion.div
                           key={claimers.join(',')}
                           className="flex items-center gap-2"
-                          initial={{ opacity: 0, scale: 0.9, y: 4 }}
-                          animate={{ opacity: 1, scale: 1, y: 0 }}
-                          exit={{ opacity: 0, scale: 0.9, y: -4 }}
+                          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.9, y: 4 }}
+                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+                          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.9, y: -4 }}
                           transition={FADE}
                         >
                           <AvatarStack names={claimers} max={4} size="sm" colors={PERSON_COLORS} />
@@ -235,9 +237,9 @@ export function BillPreview({ className }: BillPreviewProps) {
                         <motion.div
                           className="flex items-center justify-end gap-1 text-sm"
                           style={{ color: myHex }}
-                          initial={{ opacity: 0, y: 4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 4 }}
+                          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
+                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
                           transition={FADE}
                         >
                           <Check className="size-4" strokeWidth={2} />
