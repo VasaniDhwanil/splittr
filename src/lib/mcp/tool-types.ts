@@ -6,7 +6,9 @@ import type { AgentScope } from '@/lib/agent-tokens';
 export type ToolOutcome =
   | { kind: 'ok'; data: unknown }
   | { kind: 'not_found'; message: string }
-  | { kind: 'invalid_input'; message: string };
+  | { kind: 'invalid_input'; message: string }
+  /** The input policy said no. Audited as `refused:<code>`; some codes count toward the circuit breaker. */
+  | { kind: 'refused'; code: string; message: string };
 
 export interface ToolDefinition<S extends z.ZodType = z.ZodType> {
   name: string;

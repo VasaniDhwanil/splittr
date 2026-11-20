@@ -54,7 +54,7 @@ function respond(status: number, code: number, message: string, extra: { reason?
   );
 }
 
-function authFailure(ip: string, reason: ResolveFailure | 'missing'): Response {
+function authFailure(ip: string, reason: ResolveFailure | 'missing', detail?: string): Response {
   const counted = rateLimit(`mcp-auth-fail:${ip}`, FAILED_AUTH_PER_MINUTE, 60_000);
   if (!counted.allowed) {
     return respond(429, -32002, 'Too many failed attempts. Wait a minute and try again.', {
@@ -62,7 +62,8 @@ function authFailure(ip: string, reason: ResolveFailure | 'missing'): Response {
       headers: { 'Retry-After': String(Math.max(1, counted.retryAfterSeconds)) },
     });
   }
-  return respond(401, -32001, AUTH_MESSAGES[reason], { reason });
+  const why = reason === 'suspended' && detail ? ` Why: ${detail}` : '';
+  return respond(401, -32001, AUTH_MESSAGES[reason] + why, { reason });
 }
 
 /** Any well-formed token in the query string, decoded or not. */
@@ -154,7 +155,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
     if (token === null) return authFailure(ip, 'missing');
     // Shape is checked before any database call, inside resolveAgentToken
     const resolved = await resolveAgentToken(token);
-    if (!resolved.ok) return authFailure(ip, resolved.reason);
+    if (!resolved.ok) return authFailure(ip, resolved.reason, resolved.detail);
     const { actor } = resolved;
 
     await touchAgentToken(actor.tokenId, ip);

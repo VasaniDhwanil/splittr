@@ -19,7 +19,9 @@ export interface Actor {
 }
 
 export type ResolveFailure = 'malformed' | 'unknown' | 'expired' | 'revoked' | 'suspended';
-export type ResolveResult = { ok: true; actor: Actor } | { ok: false; reason: ResolveFailure };
+export type ResolveResult =
+  | { ok: true; actor: Actor }
+  | { ok: false; reason: ResolveFailure; /** Why a suspended token was paused. */ detail?: string };
 
 /** A malformed value is rejected before any database call. */
 export async function resolveAgentToken(token: unknown): Promise<ResolveResult> {
@@ -27,13 +29,13 @@ export async function resolveAgentToken(token: unknown): Promise<ResolveResult> 
 
   const { data, error } = await createAdminClient()
     .from('agent_tokens')
-    .select('id, user_id, scopes, expires_at, revoked_at, suspended_at')
+    .select('id, user_id, scopes, expires_at, revoked_at, suspended_at, suspended_reason')
     .eq('token_hash', hashAgentToken(token))
     .maybeSingle();
   if (error || !data) return { ok: false, reason: 'unknown' };
 
   if (data.revoked_at) return { ok: false, reason: 'revoked' };
-  if (data.suspended_at) return { ok: false, reason: 'suspended' };
+  if (data.suspended_at) return { ok: false, reason: 'suspended', detail: data.suspended_reason ?? undefined };
   if (new Date(data.expires_at).getTime() <= Date.now()) return { ok: false, reason: 'expired' };
   return { ok: true, actor: { userId: data.user_id, tokenId: data.id, scopes: data.scopes as AgentScope[] } };
 }
@@ -134,9 +136,11 @@ export function guardAgentOrigin(request: Request): NextResponse | null {
  * (404), same-site Origin (403), session (401).
  */
 export async function guardAgentSession(
-  request: Request
+  request: Request,
+  { requireOrigin = true }: { requireOrigin?: boolean } = {}
 ): Promise<{ response: NextResponse } | { user: RouteUser; supabase: Supabase }> {
-  const refused = guardAgentOrigin(request);
+  // Reads change nothing, so they skip the Origin check; the switch always applies
+  const refused = requireOrigin ? guardAgentOrigin(request) : isAgentAccessEnabled() ? null : notFound();
   if (refused) return { response: refused };
 
   const supabase = await createClient();

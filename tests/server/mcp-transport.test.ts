@@ -26,8 +26,7 @@ import { signInAs, signOut, type TestUser } from './helpers/session';
 
 const LONG_TOKEN = /spl_pat_[A-Za-z0-9_-]{20,}/;
 const READ_TOOLS = ['get_balances', 'get_bill', 'list_my_bills', 'list_my_expenses', 'list_my_groups'];
-// WP3 adds create_bill to this list
-const WRITE_TOOLS: string[] = [];
+const WRITE_TOOLS = ['create_bill'];
 
 let restoreEnv: () => void;
 let user: TestUser;

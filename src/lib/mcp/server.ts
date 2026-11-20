@@ -3,6 +3,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { auditAgentCall, type Actor } from '@/lib/agent-access';
+import { evaluateBreaker, isBreakerRefusal } from '@/lib/agent-breaker';
 import { toolsForScopes } from './tools';
 
 export const MAX_BODY_BYTES = 64 * 1024;
@@ -63,13 +64,15 @@ export function buildMcpServer(actor: Actor, ip: string): Server {
 
     try {
       const outcome = await tool.handler(actor, parsed.data);
-      await auditAgentCall({ tokenId: actor.tokenId, userId: actor.userId, tool: tool.name, outcome: outcome.kind, ip });
+      const audited = outcome.kind === 'refused' ? `refused:${outcome.code}` : outcome.kind;
+      await auditAgentCall({ tokenId: actor.tokenId, userId: actor.userId, tool: tool.name, outcome: audited, ip });
+      if (outcome.kind === 'refused' && isBreakerRefusal(outcome.code)) await evaluateBreaker(actor.tokenId);
       if (outcome.kind === 'ok') return toolResult(outcome.data);
       return toolError(outcome.message);
     } catch {
       console.error('mcp tool failed:', tool.name);
       await auditAgentCall({ tokenId: actor.tokenId, userId: actor.userId, tool: tool.name, outcome: 'error', ip });
-      return toolError('Something went wrong reading your Splittr data. Try again.');
+      return toolError('Something went wrong. Try again.');
     }
   });
 

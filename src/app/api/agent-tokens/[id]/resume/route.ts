@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { guardAgentSession, notFound } from '@/lib/agent-access';
+import { auditAgentCall, guardAgentSession, notFound } from '@/lib/agent-access';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -23,7 +23,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       console.error('agent-token resume failed:', error.code);
       return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
-    return data && data.length > 0 ? NextResponse.json({ ok: true }) : notFound();
+    if (!data || data.length === 0) return notFound();
+    // The circuit breaker counts from here, so one more refusal does not pause the token again at once
+    await auditAgentCall({ tokenId: id, userId: guard.user.id, tool: 'token', outcome: 'resumed' });
+    return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Error in agent-token resume:', error instanceof Error ? error.message : 'unknown');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
