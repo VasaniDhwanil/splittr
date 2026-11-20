@@ -51,9 +51,10 @@ work package below is done by one agent, one at a time.
 
 ## What exists already
 
-**Phase 0 and the harness are committed** (WP0, commits `e95c8c4`..`417184d`:
-33 server tests, 120 unit tests, type-check, lint and build all pass). The
-feature rows below are still uncommitted work for WP1.
+**Committed so far:** WP0 (Phase 0 and the harness, `e95c8c4`..`417184d`) and
+WP1 (tokens, `f209659`..`ca8975c`), and the Next.js security patch to
+16.4.6 (`dcc0028`). 103 server tests and 124 unit tests pass, with
+type-check, lint and build.
 
 | Area | Files | State |
 |---|---|---|
@@ -63,10 +64,11 @@ feature rows below are still uncommitted work for WP1.
 | P4 one row per account | `src/app/api/bills/claim/route.ts`, `src/app/api/participants/route.ts` (23505 handling), `supabase/migrations/016_one_participant_per_account.sql`, claim prompt copy in `src/app/page.tsx`, `tests/server/phase0-participant-identity.test.ts` | committed |
 | P5 bill privacy | GET in `src/app/api/bills/[id]/route.ts`, `publicBill` / `memberBill` in `src/lib/auth-helpers.ts`, `src/types/index.ts`, payer logic in `src/app/bill/[id]/page.tsx`, `tests/server/phase0-bill-privacy.test.ts` | committed |
 | Proxy | `src/middleware.ts` renamed to `src/proxy.ts` (Next 16), `/api/mcp` excluded from the matcher, `tests/server/proxy-matcher.test.ts` | committed |
-| Feature, pure logic | `src/lib/agent-tokens.ts`, `src/lib/mcp/sanitize.ts`, `src/lib/mcp/guardrails.ts`, `tests/unit/agent-tokens.test.ts`, `tests/unit/mcp-sanitize.test.ts`, `tests/unit/mcp-guardrails.test.ts` | done, 26 tests green |
-| Feature, schema | `supabase/migrations/017_agent_access.sql` | applies cleanly on a fresh local stack; functions untested |
-| Feature, email | `src/lib/agent-emails.ts` (`buildAgentCodeEmail`, `buildAgentTokenCreatedEmail`, `buildAgentTokenStoppedEmail`); `emailShell` and `escapeHtml` exported from `src/lib/email.ts` | written, untested |
-| Dependencies | `@modelcontextprotocol/sdk@1.32.2`, `zod@4.3.5` in `package.json` | installed |
+| Feature, pure logic | `src/lib/agent-tokens.ts`, `src/lib/mcp/sanitize.ts`, `src/lib/mcp/guardrails.ts`, `tests/unit/agent-tokens.test.ts`, `tests/unit/mcp-sanitize.test.ts`, `tests/unit/mcp-guardrails.test.ts` | committed (WP1) |
+| Feature, schema | `supabase/migrations/017_agent_access.sql` | committed (WP1); functions tested, including races |
+| Feature, email | `src/lib/agent-emails.ts` (`buildAgentCodeEmail`, `buildAgentTokenCreatedEmail`, `buildAgentTokenStoppedEmail`); `emailShell` and `escapeHtml` exported from `src/lib/email.ts` | committed (WP1) |
+| Tokens (WP1) | `src/lib/agent-access.ts`, `src/app/api/agent-tokens/**`, `/auth/callback` lock clearing, `tests/server/agent-*.test.ts`, `tests/server/helpers/agent.ts`, `tests/unit/agent-emails.test.ts` | committed |
+| Dependencies | `@modelcontextprotocol/sdk@1.32.2`, `zod@4.3.5` in `package.json` | committed |
 
 Production facts checked read-only on 2026-11-20: Postgres 17.6; 22 bills, 58
 participants; no account has two rows on one bill; no group bill has a
@@ -129,6 +131,23 @@ of `supabase db diff --linked`, which needs the database password.)
     `/api/agent-tokens*` and `/api/agent-bills*` route answers 404 (except
     `GET /api/agent-tokens`, which answers `{ enabled: false, tokens: [] }`
     so the profile page can hide the section).
+15. **Token routes check in this order:** feature switch (404), same-site
+    `Origin` (403, a missing `Origin` is refused too), session (401), input
+    (400), wrong-code lock (429), token cap (409), request rate limit (429),
+    email. A locked or full account never spends a code request.
+16. **A malformed code costs an attempt** like any wrong code (`wrong_code`
+    with `attempts_left`); there is no `invalid_input` for the code itself.
+17. **`revoke-link`** also requires a same-site `Origin`, so the
+    `/agent-tokens/revoke` page must call it with `fetch`. It revokes every
+    unrevoked token of the owner, answers 200 `{ revoked: 0 }` when pressed
+    again, and 404 only for an unknown or malformed secret.
+18. **`DELETE /api/agent-tokens/[id]`** answers 200 for the owner's
+    already-revoked token; `resume` answers 404 for a revoked one.
+19. **Global sign-out does end old sessions for this app.** Tested: after
+    `signOut({ scope: 'global' })`, `getUser()` with a previously issued
+    access token returns no user. The proxy and every route use `getUser()`,
+    so the spec's "valid for up to an hour" caveat (D10) does not apply here.
+    It would apply to code that trusted the JWT locally (`getClaims()`).
 
 ## Works before and after the migration
 
@@ -274,6 +293,78 @@ T-INJ, T-ANNOT, T-RATE.
   two counterparties with the same display name get no handles. "My row" on a
   bill is the row with `user_id = actor`, else the host row when the actor is
   the bill's creator. Shares carry `as_of`.
+
+#### Tool outputs (WP2)
+
+Money is a number rounded to cents. Every money-bearing result carries
+`as_of` (ISO time of the read). A text field is called `name` only when the
+actor wrote it (their own bills, items, groups, their own participant name);
+otherwise it is `untrusted_name` and has been through `untrusted()`. People
+are identified by a `label` that is stable within one response: `you`,
+`host`, `member #n` (has an account), `guest #n` (no account). Guests never
+get a name field.
+
+```
+list_my_bills { limit?: 1..50 = 20, status?: 'active'|'settled' }
+  { as_of, bills: [{ id, date, created_at, status, split_mode, total,
+      role: 'creator'|'participant'|'group_member',
+      name | untrusted_name,
+      my_share: number|null, my_payment_status: 'paid'|'unpaid'|'not_applicable'|null }] }
+  newest first; my_payment_status is 'not_applicable' when the actor is the
+  one collecting, null when the actor has no row on the bill.
+
+get_bill { bill_id: uuid }
+  { as_of, id, date, status, split_mode, name | untrusted_name,
+    subtotal, tax, tip, total,
+    items: [{ name | untrusted_name, unit_price, quantity }],
+    people: [{ label, is_you, is_host, has_account,
+               name? (only when is_you) | untrusted_name? (others with an account),
+               share, paid }],
+    my_share: number|null }
+
+list_my_groups {}
+  { groups: [{ id, name | untrusted_name, member_count, role: 'owner'|'member' }] }
+
+get_balances { group_id?: uuid }
+  { as_of, scope: 'group'|'all',
+    balances: [{ label: 'person #n', untrusted_name,
+                 direction: 'you_owe'|'owes_you', amount,
+                 pay_with?: { venmo?, cashapp?, paypal? } }],   // only when you_owe
+    unverified: [{ kind: 'guest_owes_you'|'name_matches_you', bill_id, amount }],
+    notes: string[] }
+
+list_my_expenses { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }   // at most 366 days
+  { as_of, from, to, total_my_share,
+    expenses: [{ bill_id, date, name | untrusted_name, total, my_share,
+                 payment_status: 'paid'|'unpaid'|'not_applicable',
+                 role: 'creator'|'participant' }] }
+  only bills where the actor has a row.
+```
+
+Balance rules. Over the related, published, unsettled bills (one group's, or
+all of them): the creditor is `paid_by_user_id`, else `creator_user_id`
+(skip the bill if neither is set). Shares come from `calculateSplits`. A
+participant who is marked paid owes nothing; the host owes nothing unless
+someone else paid. A participant's account is their `user_id`, or the bill's
+`creator_user_id` for a host row without one. Only debts between two
+accounts where one is the actor are netted into `balances`. A guest (no
+account) owing on a bill the actor collects goes to `unverified` as
+`guest_owes_you`; a guest row whose name equals the actor's display name (on
+a bill someone else collects) goes there as `name_matches_you`. Name matches
+never reach `balances` and never carry handles. `pay_with` is read from the
+counterparty's `profiles` row (Venmo, Cash App, PayPal only, never Zelle,
+never a bill's own handles) and only when the actor owes; if two
+counterparties in the result share a display name (case-insensitive), both
+lose `pay_with` and a note says why.
+
+Errors. Unknown or out-of-scope tool: a JSON-RPC error (invalid params,
+"Unknown tool"), no audit of the tool name's existence either way beyond
+`unknown_tool`. Invalid input, and a bill or group that is unrelated or does
+not exist: a tool result with `isError: true` and one identical message per
+case ("Bill not found", "Group not found"); nothing written. Every
+authenticated `tools/call` writes one audit row (`ok`, `invalid_input`,
+`not_found`, `unknown_tool`, `error`) and every authenticated request calls
+`touchAgentToken`.
 
 ### WP3. Proposed bills, approval, guardrails
 Spec D12 (G1, G2, G4), T-INPUT, T-GUARD.
