@@ -230,6 +230,17 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
+      // An account has one row per bill (unique index): a second join that
+      // raced the first lands here and gets the row the first one created.
+      if (error.code === '23505' && user) {
+        const { data: mine } = await db
+          .from('participants')
+          .select(PARTICIPANT_COLUMNS)
+          .eq('bill_id', bill_id)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (mine) return NextResponse.json(mine);
+      }
       console.error('Error creating participant:', error);
       return NextResponse.json(
         { error: 'Failed to join bill' },

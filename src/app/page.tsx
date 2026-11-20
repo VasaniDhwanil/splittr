@@ -555,7 +555,9 @@ export default function Home() {
             <DialogTitle className="text-white text-xl">Add bills to your account?</DialogTitle>
             <DialogDescription className="text-white/50">
               We found {claimableBills.length} bill{claimableBills.length !== 1 ? 's' : ''} on this device.
-              Add them so you can access them from any device.
+              Add {claimableBills.length !== 1 ? 'them' : 'it'} so you can access {claimableBills.length !== 1 ? 'them' : 'it'} from
+              any device. You&apos;ll appear as the host on {claimableBills.length !== 1 ? 'each one' : 'it'}, so skip
+              this if someone else created {claimableBills.length !== 1 ? 'them' : 'it'} here.
             </DialogDescription>
           </DialogHeader>
 

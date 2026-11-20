@@ -60,8 +60,25 @@ export async function POST(request: NextRequest) {
 
       if (error || !data) {
         failed.push(bill_id);
-      } else {
-        claimed++;
+        continue;
+      }
+      claimed++;
+
+      // The bill's host row becomes theirs, unless they are already on this
+      // bill as someone else (they joined it from their account earlier).
+      const { data: alreadyOn } = await db
+        .from('participants')
+        .select('id')
+        .eq('bill_id', bill_id)
+        .eq('user_id', user.id)
+        .limit(1);
+      if (!alreadyOn || alreadyOn.length === 0) {
+        await db
+          .from('participants')
+          .update({ user_id: user.id })
+          .eq('bill_id', bill_id)
+          .eq('is_creator', true)
+          .is('user_id', null);
       }
     }
 
