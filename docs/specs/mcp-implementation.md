@@ -21,6 +21,19 @@ work package below is done by one agent, one at a time.
   `npm run db:reset` (wipes local data, replays `supabase/migrations/`).
   Migrations are plain SQL files named `NNN_name.sql`; never apply them
   anywhere else.
+- **`.env.local` is production.** It holds the production Supabase URL and
+  service key, the Resend key and the Anthropic key, and Next bakes
+  `NEXT_PUBLIC_*` values in at build time. So never run `next dev`,
+  `next build` followed by `next start`, or any script against a server,
+  without first running `source scripts/local-env.sh` in the same shell. That
+  script exports the local stack's Supabase settings, a test pepper,
+  `MCP_ENABLED=true`, and empty `RESEND_API_KEY` / `ANTHROPIC_API_KEY`
+  (variables already set in the shell win over `.env.local`, including empty
+  ones). Rebuild after sourcing it: a `.next` built without it talks to
+  production. Before the first request, confirm the server is local: the
+  script prints the URL it exported, and it must be `http://127.0.0.1:54321`.
+  `npm run test:server` and `npm test` are safe on their own (they never read
+  `.env.local` and refuse non-local URLs).
 - **Tests first.** Write the failing test, watch it fail, then write the
   code. Server tests: `npm run test:server` (vitest, node, real local
   Postgres, files in `tests/server/`). Pure-logic tests: `npm test`
@@ -52,9 +65,9 @@ work package below is done by one agent, one at a time.
 ## What exists already
 
 **Committed so far:** WP0 (Phase 0 and the harness, `e95c8c4`..`417184d`) and
-WP1 (tokens, `f209659`..`ca8975c`), and the Next.js security patch to
-16.4.6 (`dcc0028`). 103 server tests and 124 unit tests pass, with
-type-check, lint and build.
+WP1 (tokens, `f209659`..`ca8975c`), the Next.js security patch to 16.4.6
+(`dcc0028`), and WP2 (`/api/mcp` and the read tools, `ebab167`..`5edfc50`).
+183 server tests and 124 unit tests pass, with type-check, lint and build.
 
 | Area | Files | State |
 |---|---|---|
