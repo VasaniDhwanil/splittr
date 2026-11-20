@@ -64,7 +64,7 @@ work package below is done by one agent, one at a time.
 
 ## What exists already
 
-**Committed so far:** WP0 (Phase 0 and the harness, `e95c8c4`..`417184d`) and
+**Committed so far (before WP3):** WP0 (Phase 0 and the harness, `e95c8c4`..`417184d`) and
 WP1 (tokens, `f209659`..`ca8975c`), the Next.js security patch to 16.4.6
 (`dcc0028`), and WP2 (`/api/mcp` and the read tools, `ebab167`..`5edfc50`).
 183 server tests and 124 unit tests pass, with type-check, lint and build.
@@ -194,6 +194,57 @@ of `supabase db diff --linked`, which needs the database password.)
 28. **`paid` on a person** is the raw payment status of their row; the person
     collecting is not marked paid. `my_payment_status` is `not_applicable`
     for the collector.
+29. **`scripts/local-env.sh`** (WP3): `source` it before any server or build.
+    It reads `supabase status -o env`, refuses unless the URL is the local
+    stack, and prints only the URL. The pepper it sets is a fixed 40-character
+    test value.
+30. **`create_bill`'s schema is as loose as the web's** (up to 100 items, price
+    up to 100000), and the agent limits (40 items, $1,000 a unit, $2,000 a
+    total) are drawn by `checkBillInput`. A tighter schema would answer
+    `invalid_input`, which is not audited as a refusal and never reaches the
+    circuit breaker, making `too_many_items` and `unit_price_cap` unreachable.
+    The tool description states the real limits.
+31. **Daily cap** is `hitRateLimit('agent-bills:<user>', 20, 86400)`: a fixed
+    window aligned to UTC midnight, per account across all its tokens. Around
+    midnight an account can get up to 40 proposals in 24 hours. Only calls that
+    passed the input policy and the duplicate check spend it.
+32. **Audit vocabulary:** `create_bill` writes `ok`, `invalid_input`,
+    `refused:<code>` (`too_many_items`, `unit_price_cap`, `total_cap`,
+    `duplicate`, `daily_cap`) or `error`. The owner's choices write tool
+    `approval`, outcome `approval_approved` / `approval_declined`, against the
+    creating token (token id null when the token no longer exists; then
+    nothing is counted). The breaker writes tool `token`, outcome `suspended`;
+    `resume` writes `resumed`, and the breaker counts only rows after the
+    latest `resumed` in the window, or a resumed token would be paused again
+    by its next refusal.
+33. **Breaker:** counted refusals are `total_cap`, `unit_price_cap`,
+    `too_many_items`, `duplicate` (5 in the last hour) and declines (3 in the
+    last hour, decline of an expired proposal included). The suspension is a
+    conditional update (`suspended_at is null`), and only the call that wins
+    it sends the email, so parallel refusals send one. The next MCP call is
+    401 with reason `suspended` and the stored reason appended ("Why: ...").
+34. **Unpublished bills on claim routes** answer as a missing item (400 on
+    POST and batch, 404 on DELETE), not 403 `not_on_bill`, so they cannot be
+    told apart from a nonexistent item. Participant routes answer "Participant
+    not found" / "Bill not found". `canEditClaims` and `requireBillOwnership`
+    also refuse, as a second layer.
+35. **Link origin for agents** is `agentSiteOrigin()`: `NEXT_PUBLIC_SITE_URL`
+    when set, else `CANONICAL_ORIGIN`. Never request headers. The breaker's
+    email uses it too.
+36. **Realtime doorbell is not gated** (decision 10), although spec T-GUARD
+    lists it: its payload carries no bill data and its topic is the bill id.
+37. **Approval routes:** `GET` needs the feature switch and a session but no
+    Origin (it changes nothing); both POSTs need all three. Approve is one
+    conditional `update ... where creator_user_id = caller and
+    approval_required and approved_at is null and approval_expires_at > now`;
+    decline is the same conditions as a `delete`. Zero rows then means 404,
+    except an expired own proposal on approve, which is 410.
+38. **Known gap:** two identical `create_bill` calls that run at the same
+    instant can both pass the duplicate check (it is a read, then a write).
+    The daily cap is atomic; the duplicate check is not.
+39. **`/api/bills/mine`** returns an explicit field list plus the three new
+    fields (it used to return whatever its column list named), built from
+    `select('*')` so it works before migration 017.
 
 ## Works before and after the migration
 
