@@ -69,7 +69,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
  * language of supabase/email-templates/magic-link.html so auth and app mail
  * look like one product.
  */
-function emailShell(bodyHtml: string): string {
+export function emailShell(bodyHtml: string): string {
   return `<table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0a;padding:40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <tr>
     <td align="center">
@@ -151,7 +151,7 @@ export function buildGroupInviteEmail(input: GroupInviteEmail): {
   };
 }
 
-function escapeHtml(raw: string): string {
+export function escapeHtml(raw: string): string {
   return raw
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
