@@ -50,6 +50,10 @@ work package below is done by one agent, one at a time.
   `Co-Authored-By: Claude <noreply@anthropic.com>`. Stage files by name
   (never `git add -A` / `git add .`). Never stage anything under `video/`,
   `.claude/`, `.agents/`, or `skills-lock.json`. Do not push.
+- **Another session shares this checkout** and commits its own work under
+  `video/`. Never touch `video/`. Commit with explicit paths
+  (`git add <new files>` then `git commit -m "..." -- <paths>`), which
+  commits only those paths even if something else is staged.
 - **Code style:** match the surrounding code (2-space indent, single quotes in
   `src/`, comments only where they state a constraint the code can't show).
   No em-dashes in user-facing copy. Server-only modules never get imported

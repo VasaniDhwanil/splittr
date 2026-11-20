@@ -13,6 +13,7 @@ import { createClient } from '@/lib/supabase/client';
 import { AvatarInitials } from '@/components/avatar-initials';
 import { Reveal } from '@/components/groups/reveal';
 import { Section } from '@/components/groups/section';
+import { AgentAccess } from '@/components/agent/agent-access';
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -307,6 +308,10 @@ export default function ProfilePage() {
             </Button>
           </Reveal>
         </form>
+
+        <div className="mt-10">
+          <AgentAccess />
+        </div>
       </div>
     </main>
   );
