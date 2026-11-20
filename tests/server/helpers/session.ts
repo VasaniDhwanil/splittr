@@ -28,6 +28,14 @@ export function fakeServerClient() {
     auth: {
       getUser: async () => ({ data: { user: current }, error: null }),
       signOut: globalSignOut,
+      verifyOtp: async () => ({
+        data: { user: current },
+        error: current ? null : { message: 'invalid token' },
+      }),
+      exchangeCodeForSession: async () => ({
+        data: { user: current },
+        error: current ? null : { message: 'invalid code' },
+      }),
     },
   };
 }
