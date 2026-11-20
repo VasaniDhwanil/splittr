@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isPublished } from '@/lib/bill-visibility';
 
 /** Constant-time string comparison so token checks don't leak via timing. */
 function safeEqual(a: string, b: string): boolean {
@@ -30,11 +31,12 @@ export async function requireBillOwnership(
 ): Promise<BillOwnershipResult> {
   const { data: bill, error } = await createAdminClient()
     .from('bills')
-    .select('creator_token, creator_user_id')
+    .select('*') // not a column list: the approval columns may not exist yet
     .eq('id', billId)
     .single();
 
-  if (error || !bill) {
+  // A bill waiting for approval is not there, even for its creator
+  if (error || !bill || !isPublished(bill)) {
     return { authorized: false, notFound: true };
   }
 
@@ -105,6 +107,12 @@ export function memberBill(bill: BillRow): BillRow {
   return { ...publicBill(bill), ...pick(bill, MEMBER_BILL_COLUMNS) };
 }
 
+/** Does a published bill with this id exist? Proposals awaiting approval answer no. */
+export async function isBillPublished(billId: string): Promise<boolean> {
+  const { data } = await createAdminClient().from('bills').select('*').eq('id', billId).maybeSingle();
+  return Boolean(data && isPublished(data));
+}
+
 /** Participant columns safe to send to clients (never the token hash). */
 export const PARTICIPANT_COLUMNS =
   'id, bill_id, user_id, name, is_creator, created_at, custom_amount, payment_status, paid_at';
@@ -160,6 +168,8 @@ export async function canEditClaims(
   supabase: SupabaseClient
 ): Promise<boolean> {
   const db = createAdminClient();
+
+  if (!(await isBillPublished(billId))) return false;
 
   const participantToken = request.headers.get('X-Participant-Token');
   if (participantToken) {

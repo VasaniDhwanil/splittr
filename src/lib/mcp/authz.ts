@@ -17,6 +17,7 @@
  */
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { Actor } from '@/lib/agent-access';
+import { isPublished } from '@/lib/bill-visibility';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (value: unknown): value is string => typeof value === 'string' && UUID.test(value);
@@ -81,9 +82,6 @@ export type RelatedBill = BillRow & {
   /** How the actor is connected: the actor has their own participant row on it. */
   readonly viaParticipant: boolean;
 };
-
-export const isPublished = (bill: Pick<BillRow, 'approval_required' | 'approved_at'>) =>
-  !bill.approval_required || bill.approved_at !== null;
 
 const PUBLISHED_FILTER = 'approval_required.eq.false,approved_at.not.is.null';
 

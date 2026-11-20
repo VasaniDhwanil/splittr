@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clampNumber, LIMITS } from '@/lib/validate';
-import { canEditClaims } from '@/lib/auth-helpers';
+import { canEditClaims, isBillPublished } from '@/lib/auth-helpers';
 
 interface BatchEntry {
   participant_id: string;
@@ -61,7 +61,8 @@ export async function POST(request: NextRequest) {
     if (
       !item ||
       (billParticipants || []).length !== ids.length ||
-      (billParticipants || []).some((p) => p.bill_id !== item.bill_id)
+      (billParticipants || []).some((p) => p.bill_id !== item.bill_id) ||
+      !(await isBillPublished(item.bill_id))
     ) {
       return NextResponse.json(
         { error: 'Participants and item do not belong to the same bill' },

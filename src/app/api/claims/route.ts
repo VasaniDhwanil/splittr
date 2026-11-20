@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clampNumber, LIMITS } from '@/lib/validate';
-import { canEditClaims } from '@/lib/auth-helpers';
+import { canEditClaims, isBillPublished } from '@/lib/auth-helpers';
 
 const NOT_ON_BILL = 'Join this bill to change who had what';
 
@@ -32,7 +32,8 @@ export async function POST(request: NextRequest) {
       db.from('bill_items').select('bill_id, quantity').eq('id', item_id).maybeSingle(),
     ]);
 
-    if (!participant || !item || participant.bill_id !== item.bill_id) {
+    // A bill waiting for approval has no items as far as anyone can tell
+    if (!participant || !item || participant.bill_id !== item.bill_id || !(await isBillPublished(item.bill_id))) {
       return NextResponse.json(
         { error: 'Participant and item do not belong to the same bill' },
         { status: 400 }
@@ -132,7 +133,7 @@ export async function DELETE(request: NextRequest) {
       .select('bill_id')
       .eq('id', item_id)
       .maybeSingle();
-    if (!item) {
+    if (!item || !(await isBillPublished(item.bill_id))) {
       return NextResponse.json({ error: 'Item not found' }, { status: 404 });
     }
     if (!(await canEditClaims(request, item.bill_id, supabase))) {

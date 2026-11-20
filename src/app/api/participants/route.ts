@@ -4,9 +4,11 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import {
   requireBillOwnership,
   canActAsParticipant,
+  isBillPublished,
   issueParticipantToken,
   PARTICIPANT_COLUMNS,
 } from '@/lib/auth-helpers';
+import { isPublished } from '@/lib/bill-visibility';
 import { cleanText, LIMITS } from '@/lib/validate';
 
 export async function PATCH(request: NextRequest) {
@@ -33,7 +35,7 @@ export async function PATCH(request: NextRequest) {
       .eq('id', participant_id)
       .maybeSingle();
 
-    if (!participant) {
+    if (!participant || !(await isBillPublished(participant.bill_id))) {
       return NextResponse.json({ error: 'Participant not found' }, { status: 404 });
     }
 
@@ -124,11 +126,11 @@ export async function POST(request: NextRequest) {
     // Check if bill exists
     const { data: bill } = await db
       .from('bills')
-      .select('id, group_id')
+      .select('*') // not a column list: the approval columns may not exist yet
       .eq('id', bill_id)
       .single();
 
-    if (!bill) {
+    if (!bill || !isPublished(bill)) {
       return NextResponse.json(
         { error: 'Bill not found' },
         { status: 404 }
@@ -279,7 +281,7 @@ export async function DELETE(request: NextRequest) {
       .eq('id', participant_id)
       .maybeSingle();
 
-    if (!participant) {
+    if (!participant || !(await isBillPublished(participant.bill_id))) {
       return NextResponse.json({ error: 'Participant not found' }, { status: 404 });
     }
 

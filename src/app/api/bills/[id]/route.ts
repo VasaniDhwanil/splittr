@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isPublished } from '@/lib/bill-visibility';
 import { requireBillOwnership, publicBill, memberBill, PARTICIPANT_COLUMNS } from '@/lib/auth-helpers';
 import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
 import { parseZelleInput, ZELLE_INPUT_ERROR } from '@/lib/payment-links';
@@ -41,7 +42,8 @@ export async function GET(
 
     const { data: bill, error: billError } = await billQuery;
 
-    if (billError || !bill) {
+    // A bill waiting for approval is not found, whoever asks
+    if (billError || !bill || !isPublished(bill)) {
       return NextResponse.json(
         { error: 'Bill not found' },
         { status: 404 }

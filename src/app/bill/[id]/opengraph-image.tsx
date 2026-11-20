@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { loadBillPreview } from "@/lib/bill-preview";
 import { formatCurrency } from "@/lib/calculations";
 
 // The admin client (service-role key, supabase-js) runs on Node.
@@ -11,46 +11,9 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const GREEN = "#4ade80";
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-interface BillImageRow {
-  name: string | null;
-  subtotal: number | string | null;
-  tax: number | string | null;
-  tip_amount: number | string | null;
-  participants: { name: string | null; is_creator: boolean | null }[] | null;
-}
-
-interface BillCard {
-  name: string;
-  host: string | null;
-  count: number;
-  total: number;
-}
 
 function clampText(text: string, max = 70): string {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
-}
-
-async function loadBill(id: string): Promise<BillCard | null> {
-  if (!UUID_RE.test(id)) return null;
-  try {
-    const { data } = await createAdminClient()
-      .from("bills")
-      .select("name, subtotal, tax, tip_amount, participants(name, is_creator)")
-      .eq("id", id)
-      .maybeSingle<BillImageRow>();
-    if (!data) return null;
-    const people = data.participants ?? [];
-    return {
-      name: data.name?.trim() || "A shared bill",
-      host: people.find((p) => p.is_creator)?.name?.trim() || null,
-      count: people.length,
-      total: Number(data.subtotal ?? 0) + Number(data.tax ?? 0) + Number(data.tip_amount ?? 0),
-    };
-  } catch {
-    return null;
-  }
 }
 
 function Mark({ px }: { px: number }) {
@@ -104,7 +67,7 @@ function GenericCard({ headline, sub }: { headline: string; sub: string }) {
 
 export default async function BillOpengraphImage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const bill = await loadBill(id);
+  const bill = await loadBillPreview(id);
 
   if (!bill) {
     return new ImageResponse(

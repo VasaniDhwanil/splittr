@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { approvalState } from '@/lib/bill-visibility';
 
 export async function GET() {
   try {
@@ -17,7 +18,7 @@ export async function GET() {
 
     const { data: bills, error } = await db
       .from('bills')
-      .select('id, name, short_code, status, subtotal, tax, tip_amount, created_at')
+      .select('*') // not a column list: the approval columns may not exist yet
       .eq('creator_user_id', user.id)
       .order('created_at', { ascending: false });
 
@@ -29,7 +30,25 @@ export async function GET() {
       );
     }
 
-    return NextResponse.json(bills ?? []);
+    const now = Date.now();
+    const rows = (bills ?? []).flatMap((bill) => {
+      const { listed, ...approval } = approvalState(bill, now);
+      if (!listed) return [];
+      return [
+        {
+          id: bill.id,
+          name: bill.name,
+          short_code: bill.short_code,
+          status: bill.status,
+          subtotal: bill.subtotal,
+          tax: bill.tax,
+          tip_amount: bill.tip_amount,
+          created_at: bill.created_at,
+          ...approval,
+        },
+      ];
+    });
+    return NextResponse.json(rows);
   } catch (error) {
     console.error('Error in bills/mine GET:', error);
     return NextResponse.json(

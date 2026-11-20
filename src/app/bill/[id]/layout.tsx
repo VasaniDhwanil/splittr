@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { loadBillPreview } from "@/lib/bill-preview";
 
 // Bill data is live (people join and claim items), so never cache the preview.
 export const dynamic = "force-dynamic";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Bills are private and ephemeral: keep them out of search indexes.
 const ROBOTS: Metadata["robots"] = { index: false, follow: false };
@@ -25,37 +23,21 @@ const GENERIC: Metadata = {
   twitter: { card: "summary_large_image", title: "Splittr", description: GENERIC_DESCRIPTION },
 };
 
-interface PreviewParticipant {
-  name: string | null;
-  is_creator: boolean | null;
-}
-
-interface BillPreviewRow {
-  name: string | null;
-  participants: PreviewParticipant[] | null;
-}
-
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  if (!UUID_RE.test(id)) return GENERIC;
 
   try {
-    // Service-role read of public-facing fields only; never select tokens.
-    const { data } = await createAdminClient()
-      .from("bills")
-      .select("name, participants(name, is_creator)")
-      .eq("id", id)
-      .maybeSingle<BillPreviewRow>();
-    if (!data) return GENERIC;
+    // A bill waiting for approval gets the same generic preview as a missing one
+    const bill = await loadBillPreview(id);
+    if (!bill) return GENERIC;
 
-    const billName = data.name?.trim() || "A shared bill";
-    const people = data.participants ?? [];
-    const host = people.find((p) => p.is_creator)?.name?.trim();
-    const count = people.length;
+    const billName = bill.name;
+    const host = bill.host;
+    const count = bill.count;
 
     const title = `${billName} · Splittr`;
     const description = [

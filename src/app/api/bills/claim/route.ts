@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isPublished } from '@/lib/bill-visibility';
 import { LIMITS } from '@/lib/validate';
 
 interface ClaimEntry {
@@ -45,6 +46,13 @@ export async function POST(request: NextRequest) {
       const { bill_id, creator_token } = claim ?? {};
       if (typeof bill_id !== 'string' || typeof creator_token !== 'string' || !creator_token) {
         failed.push(String(bill_id));
+        continue;
+      }
+
+      // A bill waiting for approval can't be adopted (it has no creator token anyway)
+      const { data: row } = await db.from('bills').select('*').eq('id', bill_id).maybeSingle();
+      if (row && !isPublished(row)) {
+        failed.push(bill_id);
         continue;
       }
 
