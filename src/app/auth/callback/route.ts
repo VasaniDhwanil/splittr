@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { EmailOtpType } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { ensureProfile } from '@/lib/auth-profile'
+import { clearMintLock } from '@/lib/agent-access'
 import { ALLOWED_ORIGINS } from '@/lib/site-origin'
 
 /** Only ever redirect to a same-site path — never to an arbitrary URL. */
@@ -67,7 +68,11 @@ export async function GET(request: Request) {
     const type = (searchParams.get('type') as EmailOtpType) || 'email'
     const { data, error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash })
     if (!error) {
-      if (data.user) await ensureProfile(data.user)
+      if (data.user) {
+        await ensureProfile(data.user)
+        // A verified magic link is a fresh sign-in: lift any agent-token lock
+        await clearMintLock(data.user.id)
+      }
       return NextResponse.redirect(`${origin}${dest}`)
     }
     return NextResponse.redirect(
@@ -78,7 +83,10 @@ export async function GET(request: Request) {
   if (code) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
-      if (data.user) await ensureProfile(data.user)
+      if (data.user) {
+        await ensureProfile(data.user)
+        await clearMintLock(data.user.id)
+      }
       return NextResponse.redirect(`${origin}${dest}`)
     }
   }
