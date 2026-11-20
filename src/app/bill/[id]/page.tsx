@@ -52,6 +52,9 @@ export default function BillPage() {
   const [showJoinDialog, setShowJoinDialog] = useState(false);
   // Same name already on the bill (joined from another device?), confirm
   const [duplicateCandidate, setDuplicateCandidate] = useState<Participant | null>(null);
+  // This device picked an existing name but holds no proof of being on the
+  // bill, so the next join has to create its own row
+  const [mustJoinFresh, setMustJoinFresh] = useState(false);
   // Creator removing a participant
   const [removeTarget, setRemoveTarget] = useState<Participant | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
@@ -255,7 +258,7 @@ export default function BillPage() {
 
     // Same name already on the bill? Probably the same person on a second
     // device, so confirm before creating a duplicate.
-    if (!forceNew) {
+    if (!forceNew && !mustJoinFresh) {
       const existing = participants.find(
         (p) => p.name.trim().toLowerCase() === joinName.trim().toLowerCase()
       );
@@ -300,6 +303,7 @@ export default function BillPage() {
 
       setShowJoinDialog(false);
       setJoinName('');
+      setMustJoinFresh(false);
       toast.success(`Welcome, ${participant.name}!`);
       await fetchBill();
     } catch (error) {
@@ -308,6 +312,20 @@ export default function BillPage() {
     } finally {
       setIsJoining(false);
     }
+  };
+
+  // Changing claims takes proof of being on the bill: this device's join
+  // token, a signed-in account on the bill, or the host's token. A device
+  // that only picked an existing name has none of those.
+  const handleNotOnBill = () => {
+    if (!bill) return;
+    localStorage.removeItem(`splittr-participant-${bill.id}`);
+    setCurrentParticipant(null);
+    setShowSplitSheet(false);
+    setSplitItem(null);
+    setMustJoinFresh(true);
+    setShowJoinDialog(true);
+    toast.info('Join the bill on this device to change who had what.');
   };
 
   const handleRemoveParticipant = async () => {
@@ -367,7 +385,13 @@ export default function BillPage() {
     try {
       const res = await fetch(`/api/claims?participant_id=${me.id}&item_id=${item.id}`, {
         method: 'DELETE',
+        headers: participantHeaders(me.id),
       });
+      if (res.status === 403) {
+        setClaims((prev) => [...prev, existingClaim]);
+        handleNotOnBill();
+        return;
+      }
       if (!res.ok) throw new Error('Failed to unclaim');
       toast.success("Got it, you're off the hook!");
       scheduleFetch(); // realtime alone misses claim DELETEs (filter can't match delete payloads)
@@ -401,10 +425,15 @@ export default function BillPage() {
     try {
       const res = await fetch('/api/claims/batch', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: currentParticipant ? participantHeaders(currentParticipant.id) : creatorHeaders(),
         body: JSON.stringify({ item_id: item.id, entries }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 403) {
+        setClaims(prevClaims);
+        handleNotOnBill();
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to split');
       setShowSplitSheet(false);
       setSplitItem(null);
@@ -694,17 +723,18 @@ export default function BillPage() {
   const myShare = splits.find((s) => s.participant.id === currentParticipant?.id);
   const grandTotal = billTotal(bill);
 
-  // Whoever fronted the money collects: paid_by when set, else the creator
-  const payerParticipantId = bill.paid_by_user_id
-    ? participants.find((p) => p.user_id === bill.paid_by_user_id)?.id ?? null
+  // Whoever fronted the money collects: paid_by when set, else the creator.
+  // The server names the payer's row, so this works without account ids.
+  const payerParticipantId = bill.paid_by
+    ? bill.paid_by.participant_id
     : creatorParticipant?.id ?? null;
   const payerDisplayName = bill.paid_by?.name || creatorParticipant?.name || 'the host';
-  const iAmPayer = bill.paid_by_user_id
+  const iAmPayer = bill.paid_by
     ? currentParticipant?.id === payerParticipantId
     : Boolean(currentParticipant?.is_creator);
   // Payment tracking (the payer collects, so progress is over everyone else)
   const payers = participants.filter((p) =>
-    bill.paid_by_user_id ? p.id !== payerParticipantId : !p.is_creator
+    bill.paid_by ? p.id !== payerParticipantId : !p.is_creator
   );
   const paidCount = payers.filter((p) => p.payment_status === 'paid').length;
   const iAmPaid = currentParticipant?.payment_status === 'paid';

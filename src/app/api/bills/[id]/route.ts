@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { requireBillOwnership, publicBill, PARTICIPANT_COLUMNS } from '@/lib/auth-helpers';
+import { requireBillOwnership, publicBill, memberBill, PARTICIPANT_COLUMNS } from '@/lib/auth-helpers';
 import { cleanText, clampNumber, sanitizeItems, LIMITS } from '@/lib/validate';
 import { parseZelleInput, ZELLE_INPUT_ERROR } from '@/lib/payment-links';
 import { signZelleQr } from '@/lib/zelle-server';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(
   request: NextRequest,
@@ -24,10 +26,11 @@ export async function GET(
     }
 
     const { id } = await params;
+    const supabase = await createClient(); // auth (cookies) only
     const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
 
     // Check if id is a short_code or UUID
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    const isUUID = UUID_RE.test(id);
 
     let billQuery;
     if (isUUID) {
@@ -53,7 +56,7 @@ export async function GET(
       .order('created_at', { ascending: true });
 
     // Get participants
-    const { data: participants } = await db
+    const { data: participantRows } = await db
       .from('participants')
       .select(PARTICIPANT_COLUMNS)
       .eq('bill_id', bill.id)
@@ -65,6 +68,37 @@ export async function GET(
       .from('item_claims')
       .select('*')
       .in('item_id', itemIds);
+
+    // Who is looking decides which account ids go out. A share link shows
+    // who is on the bill, not which accounts they are: each viewer gets only
+    // their own user_id (group members also get their fellow members'), and creator / group / payer ids go only to the
+    // bill's creator and to members of its group.
+    const {
+      data: { user: viewer },
+    } = await supabase.auth.getUser();
+
+    let groupMembers: { user_id: string; display_name: string }[] = [];
+    if (bill.group_id) {
+      const { data: members } = await db
+        .from('group_members')
+        .select('user_id, display_name')
+        .eq('group_id', bill.group_id)
+        .order('created_at', { ascending: true });
+      groupMembers = members || [];
+    }
+    const viewerIsMember = Boolean(viewer && groupMembers.some((m) => m.user_id === viewer.id));
+    const viewerIsInsider =
+      viewerIsMember || Boolean(viewer && bill.creator_user_id && viewer.id === bill.creator_user_id);
+
+    // Group members already know each other's accounts (the group page lists
+    // them), and the group ledger matches debtors by account id.
+    const memberIds = new Set(groupMembers.map((m) => m.user_id));
+    const participants = (participantRows || []).map((p) => ({
+      ...p,
+      user_id: p.user_id && (p.user_id === viewer?.id || (viewerIsMember && memberIds.has(p.user_id)))
+        ? p.user_id
+        : null,
+    }));
 
     // Smart pay: when the host hasn't set handles on this bill, fall back to
     // the payment handles configured on their profile. The host's Zelle QR
@@ -87,44 +121,38 @@ export async function GET(
       }
     }
 
-    // Group bills: expose the member list (for the payer picker) and, when
-    // someone other than the creator paid, that payer's name + pay handles.
-    let groupMembers: { user_id: string; display_name: string }[] | undefined;
+    // Group bills where someone other than the creator paid: that payer's
+    // name + pay handles, and which participant they are (so the page can
+    // tell who collects without knowing anyone's account).
     let paidBy: Record<string, unknown> | null = null;
-    if (bill.group_id) {
-      const { data: members } = await db
-        .from('group_members')
-        .select('user_id, display_name')
-        .eq('group_id', bill.group_id)
-        .order('created_at', { ascending: true });
-      groupMembers = members || [];
-
-      if (bill.paid_by_user_id) {
-        const member = groupMembers.find((m) => m.user_id === bill.paid_by_user_id);
-        const { data: payerProfile } = await db
-          .from('profiles')
-          .select('display_name, venmo_handle, cashapp_handle, paypal_handle, zelle_handle, zelle_qr_path')
-          .eq('user_id', bill.paid_by_user_id)
-          .maybeSingle();
-        paidBy = {
-          user_id: bill.paid_by_user_id,
-          name: member?.display_name || payerProfile?.display_name || 'Someone',
-          venmo_handle: payerProfile?.venmo_handle ?? null,
-          cashapp_handle: payerProfile?.cashapp_handle ?? null,
-          paypal_handle: payerProfile?.paypal_handle ?? null,
-          zelle_handle: payerProfile?.zelle_handle ?? null,
-          zelle_qr_url: await signZelleQr(db, payerProfile?.zelle_qr_path),
-        };
-      }
+    if (bill.group_id && bill.paid_by_user_id) {
+      const member = groupMembers.find((m) => m.user_id === bill.paid_by_user_id);
+      const { data: payerProfile } = await db
+        .from('profiles')
+        .select('display_name, venmo_handle, cashapp_handle, paypal_handle, zelle_handle, zelle_qr_path')
+        .eq('user_id', bill.paid_by_user_id)
+        .maybeSingle();
+      paidBy = {
+        participant_id:
+          (participantRows || []).find((p) => p.user_id === bill.paid_by_user_id)?.id ?? null,
+        name: member?.display_name || payerProfile?.display_name || 'Someone',
+        venmo_handle: payerProfile?.venmo_handle ?? null,
+        cashapp_handle: payerProfile?.cashapp_handle ?? null,
+        paypal_handle: payerProfile?.paypal_handle ?? null,
+        zelle_handle: payerProfile?.zelle_handle ?? null,
+        zelle_qr_url: await signZelleQr(db, payerProfile?.zelle_qr_path),
+        ...(viewerIsInsider ? { user_id: bill.paid_by_user_id } : {}),
+      };
     }
 
     return NextResponse.json({
-      ...publicBill(bill),
+      ...(viewerIsInsider ? memberBill(bill) : publicBill(bill)),
       ...handleFallback,
-      ...(groupMembers ? { group_members: groupMembers } : {}),
+      // The member list feeds the payer picker
+      ...(viewerIsMember ? { group_members: groupMembers } : {}),
       paid_by: paidBy,
       items: items || [],
-      participants: participants || [],
+      participants,
       claims: claims || [],
     });
   } catch (error) {
@@ -190,13 +218,49 @@ export async function PATCH(
 
     const updateData: Record<string, unknown> = {};
 
+    // Filing a bill into a group puts debts in its members' ledgers, so only
+    // a signed-in member of that group may do it, whatever token the caller
+    // holds. Taking a bill out of a group stays with the bill's owner.
+    let effectiveGroupId: string | null = bill.group_id;
+    if (group_id !== undefined) {
+      if (group_id === null || group_id === '') {
+        effectiveGroupId = null;
+      } else {
+        if (typeof group_id !== 'string' || !UUID_RE.test(group_id)) {
+          return NextResponse.json({ error: 'Invalid group_id' }, { status: 400 });
+        }
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const { data: membership } = user
+          ? await db
+              .from('group_members')
+              .select('id')
+              .eq('group_id', group_id)
+              .eq('user_id', user.id)
+              .maybeSingle()
+          : { data: null };
+        if (!membership) {
+          return NextResponse.json(
+            { error: 'Only a member of that group can add a bill to it' },
+            { status: 403 }
+          );
+        }
+        effectiveGroupId = group_id;
+      }
+      updateData.group_id = effectiveGroupId;
+      // The payer is a member of the bill's group: a different group, or no
+      // group, starts again from "the creator paid"
+      if (effectiveGroupId !== bill.group_id) updateData.paid_by_user_id = null;
+    }
+
     // Change who paid: group bills only, payer must be a member (or null to
     // reset to "the creator paid")
     if (body.paid_by_user_id !== undefined) {
       if (body.paid_by_user_id === null) {
         updateData.paid_by_user_id = null;
       } else {
-        if (!bill.group_id || typeof body.paid_by_user_id !== 'string') {
+        if (!effectiveGroupId || typeof body.paid_by_user_id !== 'string') {
           return NextResponse.json(
             { error: 'paid_by_user_id requires a group bill' },
             { status: 400 }
@@ -205,7 +269,7 @@ export async function PATCH(
         const { data: payerMembership } = await db
           .from('group_members')
           .select('id')
-          .eq('group_id', bill.group_id)
+          .eq('group_id', effectiveGroupId)
           .eq('user_id', body.paid_by_user_id)
           .maybeSingle();
         if (!payerMembership) {
@@ -258,7 +322,6 @@ export async function PATCH(
       return NextResponse.json({ error: ZELLE_INPUT_ERROR }, { status: 400 });
     }
     if (zelle.value !== undefined) updateData.zelle_handle = zelle.value;
-    if (group_id !== undefined) updateData.group_id = group_id || null;
 
     // Sync items if provided: update kept rows (claims survive), insert new, delete removed
     let subtotal = bill.subtotal;
@@ -329,7 +392,8 @@ export async function PATCH(
       );
     }
 
-    return NextResponse.json(publicBill(updatedBill));
+    // Only the bill's owner gets here
+    return NextResponse.json(memberBill(updatedBill));
   } catch (error) {
     console.error('Error updating bill:', error);
     return NextResponse.json(

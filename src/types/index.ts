@@ -12,6 +12,7 @@ export interface Bill {
   status: 'draft' | 'active' | 'settled';
   short_code: string;
   creator_id: string | null;
+  /** Only sent to the bill's creator and members of its group. */
   creator_user_id?: string | null;
   split_mode: SplitMode;
   tip_split?: TipSplit;
@@ -21,18 +22,22 @@ export interface Bill {
   zelle_handle?: string | null;
   /** Signed URL for the creator's Zelle QR, enriched by GET /api/bills/[id]. */
   zelle_qr_url?: string | null;
+  /** Only sent to the bill's creator and members of its group. */
   group_id?: string | null;
-  /** Whose money covered the bill; null = the creator paid (default). */
+  /** Whose money covered the bill; null = the creator paid (default). Insiders only, like group_id. */
   paid_by_user_id?: string | null;
-  /** Enriched by GET /api/bills/[id] when paid_by_user_id is set. */
+  /** Enriched by GET /api/bills/[id] when someone other than the creator paid. */
   paid_by?: PaidBy | null;
-  /** Group members, enriched on group bills so the UI can pick a payer. */
+  /** Group members, sent to members of the bill's group so the UI can pick a payer. */
   group_members?: { user_id: string; display_name: string }[];
   created_at: string;
 }
 
 export interface PaidBy {
-  user_id: string;
+  /** The payer's row on this bill, if they are on it. */
+  participant_id: string | null;
+  /** Only sent to the bill's creator and members of its group. */
+  user_id?: string;
   name: string;
   venmo_handle?: string | null;
   cashapp_handle?: string | null;
@@ -53,6 +58,7 @@ export interface BillItem {
 export interface Participant {
   id: string;
   bill_id: string;
+  /** From GET /api/bills/[id], set only on the viewer's own row. */
   user_id: string | null;
   name: string;
   is_creator: boolean;
