@@ -20,6 +20,8 @@ interface BillRowProps {
   total?: number;
   /** Plain muted word in the meta line, e.g. "Host" / "Joined". */
   role?: string;
+  /** Plain muted word after the role, e.g. "Created by your agent". */
+  origin?: string;
   /** Dims the row and adds "Archived" to the meta line. */
   archived?: boolean;
   /** Control at the row's end (before the chevron), e.g. archive/restore. Sits above the link. */
@@ -32,7 +34,7 @@ function Dot() {
   return <span aria-hidden>·</span>;
 }
 
-export function BillRow({ id, name, createdAt, status, peopleCount, total, role, archived, action, index }: BillRowProps) {
+export function BillRow({ id, name, createdAt, status, peopleCount, total, role, archived, origin, action, index }: BillRowProps) {
   const stagger = useStagger(index, archived ? 0.6 : 1);
   const meta: ReactNode[] = [];
   if (archived) meta.push(<span key="archived">Archived</span>);
@@ -63,6 +65,7 @@ export function BillRow({ id, name, createdAt, status, peopleCount, total, role,
         <p className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs text-white/40">
           {meta.flatMap((item, i) => (i === 0 ? [item] : [<Dot key={`dot-${i}`} />, item]))}
         </p>
+        {origin && <p className="mt-0.5 truncate text-xs text-white/35">{origin}</p>}
       </div>
       {total !== undefined && (
         <span className="font-money shrink-0 whitespace-nowrap text-[15px] text-white">{formatCurrency(total)}</span>

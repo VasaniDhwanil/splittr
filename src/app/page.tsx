@@ -22,6 +22,8 @@ import { GroupCard } from '@/components/groups/group-card';
 import { EmptyMark } from '@/components/groups/empty-mark';
 import { GroupDialog } from '@/components/groups/group-dialog';
 import { BillRow } from '@/components/groups/bill-row';
+import { PendingBillRow } from '@/components/agent/pending-bill-row';
+import { splitMineRows } from '@/lib/agent-ui';
 import { SiteNav } from '@/components/landing/site-nav';
 import { Hero } from '@/components/landing/hero';
 import { HowItWorks } from '@/components/landing/how-it-works';
@@ -42,9 +44,21 @@ interface StoredBill {
   subtotal?: number;
   tax?: number;
   tip_amount?: number;
+  created_via?: 'web' | 'agent';
 }
 
-type MineBillRow = Pick<Bill, 'id' | 'name' | 'short_code' | 'status' | 'subtotal' | 'tax' | 'tip_amount' | 'created_at'>;
+// The last three are missing when the database predates agent access.
+type MineBillRow = Pick<Bill, 'id' | 'name' | 'short_code' | 'status' | 'subtotal' | 'tax' | 'tip_amount' | 'created_at'> & {
+  approval?: 'none' | 'pending';
+  created_via?: 'web' | 'agent';
+  approval_expires_at?: string | null;
+};
+
+interface PendingBill {
+  id: string;
+  name: string;
+  expiresAt: string | null;
+}
 
 function storedBillTotal(bill: StoredBill): number | undefined {
   if (bill.subtotal === undefined) return undefined;
@@ -98,6 +112,7 @@ export default function Home() {
   const [user, setUser] = useState<{ email: string; id: string } | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [serverBills, setServerBills] = useState<StoredBill[]>([]);
+  const [pendingBills, setPendingBills] = useState<PendingBill[]>([]);
   const [showClaimPrompt, setShowClaimPrompt] = useState(false);
   const [claimableBills, setClaimableBills] = useState<StoredBill[]>([]);
   const [isClaiming, setIsClaiming] = useState(false);
@@ -132,8 +147,12 @@ export default function Home() {
     const res = await fetch('/api/bills/mine');
     if (res.ok) {
       const serverData: MineBillRow[] = await res.json();
+      const { normal, pending } = splitMineRows(serverData);
+      setPendingBills(
+        pending.map((b) => ({ id: b.id, name: b.name, expiresAt: b.approval_expires_at ?? null }))
+      );
       setServerBills(
-        serverData.map((b) => ({
+        normal.map((b) => ({
           id: b.id,
           name: b.name,
           short_code: b.short_code,
@@ -143,6 +162,7 @@ export default function Home() {
           subtotal: b.subtotal,
           tax: b.tax,
           tip_amount: b.tip_amount,
+          created_via: b.created_via,
         }))
       );
     }
@@ -269,6 +289,7 @@ export default function Home() {
     await supabase.auth.signOut();
     setUser(null);
     setServerBills([]);
+    setPendingBills([]);
     setGroups([]);
     toast.success('Signed out');
   };
@@ -365,6 +386,7 @@ export default function Home() {
                 peopleCount={details ? details.participants?.length || 0 : undefined}
                 total={details ? billTotal(details) : storedBillTotal(bill)}
                 role={bill.role === 'creator' ? 'Host' : 'Joined'}
+                origin={bill.created_via === 'agent' ? 'Created by your agent' : undefined}
                 archived={isHidden}
                 action={
                   <Button
@@ -428,6 +450,20 @@ export default function Home() {
         ) : user ? (
           /* Signed-in: a dashboard, not a landing */
           <div className="max-w-3xl pt-10 pb-24 sm:pt-14">
+            {pendingBills.length > 0 && (
+              <section className="mb-12 animate-slide-up" aria-label="Waiting for your approval">
+                <h2 className="text-xl font-semibold tracking-tight text-white">Waiting for your approval</h2>
+                <p className="mb-4 mt-1 text-sm text-white/40">
+                  Your agent proposed these. Nobody else can see them until you approve.
+                </p>
+                <div className="surface divide-y divide-white/[0.06] overflow-hidden rounded-2xl">
+                  {pendingBills.map((bill, i) => (
+                    <PendingBillRow key={bill.id} index={i} id={bill.id} name={bill.name} expiresAt={bill.expiresAt} />
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="animate-slide-up">
               <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <h1 className="text-3xl font-semibold tracking-tight text-white md:text-4xl">Your Bills</h1>

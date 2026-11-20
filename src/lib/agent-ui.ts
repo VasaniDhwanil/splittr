@@ -106,3 +106,19 @@ export function tokenErrorMessage(
       return 'Something went wrong. Please try again.';
   }
 }
+
+/** The fields of a /api/bills/mine row this module reads. Older databases omit the last three. */
+export interface MineRowLike {
+  id: string;
+  approval?: 'none' | 'pending';
+  created_via?: 'web' | 'agent';
+  approval_expires_at?: string | null;
+}
+
+/** Pending rows go to their own list and never into the normal one. A missing `approval` means none. */
+export function splitMineRows<T extends MineRowLike>(rows: T[]): { normal: T[]; pending: T[] } {
+  const normal: T[] = [];
+  const pending: T[] = [];
+  for (const row of rows) (row.approval === 'pending' ? pending : normal).push(row);
+  return { normal, pending };
+}
