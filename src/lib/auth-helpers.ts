@@ -56,11 +56,53 @@ export async function requireBillOwnership(
   return { authorized: false };
 }
 
-/** Strip server-only columns before a bill row goes into a response. */
-export function publicBill<T extends { creator_token?: unknown }>(bill: T): Omit<T, 'creator_token'> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { creator_token, ...rest } = bill;
-  return rest;
+const PUBLIC_BILL_COLUMNS = [
+  'id',
+  'name',
+  'date',
+  'subtotal',
+  'tax',
+  'tip_percent',
+  'tip_amount',
+  'status',
+  'short_code',
+  'creator_id',
+  'split_mode',
+  'tip_split',
+  'venmo_handle',
+  'cashapp_handle',
+  'paypal_handle',
+  'zelle_handle',
+  'created_at',
+] as const;
+
+const MEMBER_BILL_COLUMNS = ['creator_user_id', 'group_id', 'paid_by_user_id'] as const;
+
+type BillRow = Record<string, unknown>;
+
+function pick(row: BillRow, columns: readonly string[]): BillRow {
+  const out: BillRow = {};
+  for (const column of columns) {
+    if (column in row) out[column] = row[column];
+  }
+  return out;
+}
+
+/**
+ * What anyone holding a bill's link may see of the bill row. An allow-list,
+ * so a column added later stays private until it is listed here. Account and
+ * group ids are left out: see memberBill.
+ */
+export function publicBill(bill: BillRow): BillRow {
+  return pick(bill, PUBLIC_BILL_COLUMNS);
+}
+
+/**
+ * The bill row for its owner and for members of its group, who already know
+ * each other's accounts: adds the creator, group and payer ids.
+ */
+export function memberBill(bill: BillRow): BillRow {
+  return { ...publicBill(bill), ...pick(bill, MEMBER_BILL_COLUMNS) };
 }
 
 /** Participant columns safe to send to clients (never the token hash). */
@@ -103,4 +145,56 @@ export async function canActAsParticipant(
   }
   const ownership = await requireBillOwnership(request, participant.bill_id, supabase);
   return ownership.authorized;
+}
+
+/**
+ * May the caller change claims on this bill? Claiming is collaborative (the
+ * split sheet assigns shares to other people at the table), so the bar is
+ * being on the bill, not being the participant claimed for: a participant
+ * token or signed-in account that belongs to someone on this bill, or the
+ * bill's creator.
+ */
+export async function canEditClaims(
+  request: NextRequest,
+  billId: string,
+  supabase: SupabaseClient
+): Promise<boolean> {
+  const db = createAdminClient();
+
+  const participantToken = request.headers.get('X-Participant-Token');
+  if (participantToken) {
+    const { data: holders } = await db
+      .from('participants')
+      .select('id')
+      .eq('bill_id', billId)
+      .eq('participant_token_hash', sha256(participantToken))
+      .limit(1);
+    if (holders && holders.length > 0) return true;
+  }
+
+  const { data: bill } = await db
+    .from('bills')
+    .select('creator_token, creator_user_id')
+    .eq('id', billId)
+    .maybeSingle();
+  if (!bill) return false;
+
+  const creatorToken = request.headers.get('X-Creator-Token');
+  if (creatorToken && bill.creator_token && safeEqual(creatorToken, bill.creator_token)) {
+    return true;
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return false;
+  if (bill.creator_user_id === user.id) return true;
+
+  const { data: mine } = await db
+    .from('participants')
+    .select('id')
+    .eq('bill_id', billId)
+    .eq('user_id', user.id)
+    .limit(1);
+  return Boolean(mine && mine.length > 0);
 }

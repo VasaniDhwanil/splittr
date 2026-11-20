@@ -92,11 +92,13 @@ check('bill rename rings (bills)', await waitFor(a.messages, (m) => m?.table ===
 const joined = await api('/api/participants', { method: 'POST', body: JSON.stringify({ bill_id: billId, name: 'Alice' }) }).then((r) => r.json());
 check('join rings (participants)', await waitFor(a.messages, (m) => m?.table === 'participants'));
 
-await api('/api/claims', { method: 'POST', body: JSON.stringify({ participant_id: joined.id, item_id: itemId, share: 1 }) });
+// Claims need proof of being on the bill: the token issued at join
+const asAlice = { 'X-Participant-Token': joined.participant_token };
+await api('/api/claims', { method: 'POST', headers: asAlice, body: JSON.stringify({ participant_id: joined.id, item_id: itemId, share: 1 }) });
 check('claim rings (item_claims)', await waitFor(a.messages, (m) => m?.table === 'item_claims' && m?.bill_id === billId));
 
 const before = a.messages.length;
-await api(`/api/claims?participant_id=${joined.id}&item_id=${itemId}`, { method: 'DELETE' });
+await api(`/api/claims?participant_id=${joined.id}&item_id=${itemId}`, { method: 'DELETE', headers: asAlice });
 const afterUnclaim = { some: (pred) => a.messages.slice(before).some(pred) };
 check('unclaim rings (item_claims delete)', await waitFor(afterUnclaim, (m) => m?.table === 'item_claims'));
 

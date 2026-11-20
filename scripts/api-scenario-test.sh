@@ -60,6 +60,10 @@ post () { # cookiejar|- url json-body -> status to stdout, body to $WORK/last
   fi
 }
 
+postt () { # participant-token url json-body -> status (claims need proof of being on the bill)
+  curl -s -o "$WORK/last" -w '%{http_code}' -X POST "$2" -H 'Content-Type: application/json' -H "X-Participant-Token: $1" -d "$3"
+}
+
 echo "== sessions =="
 session "$HOST_EMAIL" "$WORK/host"
 session "$MEMBER_EMAIL" "$WORK/member"
@@ -104,16 +108,20 @@ check "host claims qty-1 item"       200 "$(post $WORK/host $BASE/api/claims "$(
 check "over-claim (5 of 2) -> 400"   400 "$(post $WORK/host $BASE/api/claims "$(json participant_id=$HPID item_id=$IT2 share=5)")"
 check "claim within quantity ok"     200 "$(post $WORK/host $BASE/api/claims "$(json participant_id=$HPID item_id=$IT2 share=2)")"
 GPID=$(post - $BASE/api/participants "$(json bill_id=$BILL name=Latecomer)" > /dev/null; field id < $WORK/last)
-check "exhausted item -> 400"        400 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT2 share=1)")"
+GTOK=$(field participant_token < $WORK/last)
+check "claim with no credential -> 403" 403 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT2 share=1)")"
+check "exhausted item -> 400"        400 "$(postt $GTOK $BASE/api/claims "$(json participant_id=$GPID item_id=$IT2 share=1)")"
 # Three people splitting 2 units as thirds: rounded ⅔ shares (0.67 x 3 = 2.01)
 # must not trip the guard — that phantom 0.01 is rounding, not an over-claim.
 TPID=$(post - $BASE/api/participants "$(json bill_id=$BILL name=Thirdsy)" > /dev/null; field id < $WORK/last)
+TTOK=$(field participant_token < $WORK/last)
 check "re-claim replaces own share"    200 "$(post $WORK/host $BASE/api/claims "$(json participant_id=$HPID item_id=$IT2 share=0.67)")"
-check "second third joins"             200 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT2 share=0.67)")"
-check "third third allowed (rounding)" 200 "$(post - $BASE/api/claims "$(json participant_id=$TPID item_id=$IT2 share=0.67)")"
+check "second third joins"             200 "$(postt $GTOK $BASE/api/claims "$(json participant_id=$GPID item_id=$IT2 share=0.67)")"
+check "third third allowed (rounding)" 200 "$(postt $TTOK $BASE/api/claims "$(json participant_id=$TPID item_id=$IT2 share=0.67)")"
 # Tap-to-split: a second FULL claim on a single-quantity item must be allowed —
 # that's how two people split one dish (the math normalizes the overlap).
-check "tap-to-split taken qty-1 item -> 200" 200 "$(post - $BASE/api/claims "$(json participant_id=$GPID item_id=$IT1 share=1)")"
+check "tap-to-split taken qty-1 item -> 200" 200 "$(postt $GTOK $BASE/api/claims "$(json participant_id=$GPID item_id=$IT1 share=1)")"
+check "unclaim with no credential -> 403" 403 "$(curl -s -o /dev/null -w %{http_code} -X DELETE "$BASE/api/claims?participant_id=$HPID&item_id=$IT1")"
 check "host unclaims"                200 "$(curl -s -b $WORK/host -o /dev/null -w %{http_code} -X DELETE "$BASE/api/claims?participant_id=$HPID&item_id=$IT1")"
 
 echo; echo "== participant removal (creator only) =="
@@ -133,6 +141,7 @@ SIT2=$(python3 -c "import json;d=json.load(open('$WORK/sbill'));print([i['id'] f
 SIT1=$(python3 -c "import json;d=json.load(open('$WORK/sbill'));print([i['id'] for i in d['items'] if i['quantity']==1][0])")
 SP1=$(python3 -c "import json;d=json.load(open('$WORK/sbill'));print(d['participants'][0]['id'])")
 SP2=$(post - $BASE/api/participants "$(json bill_id=$SBILL name=Maya)" > /dev/null; field id < $WORK/last)
+STOK=$(field participant_token < $WORK/last)
 SP3=$(post - $BASE/api/participants "$(json bill_id=$SBILL name=Sam)" > /dev/null; field id < $WORK/last)
 # Entry payloads via printf: inline {…} inside nested $() trips bash brace
 # expansion and silently mangles the JSON.
@@ -143,15 +152,17 @@ ERESPLIT="[$(entry $SP1 0.5),$(entry $SP2 0.5),$(entry $SP3 0.5)]"
 EFOREIGN="[$(entry 00000000-0000-0000-0000-000000000000 0.5)]"
 ESINGLE="[$(entry $SP1 0.5),$(entry $SP2 0.5)]"
 # One sheet action = one request: three people split 2 dumplings as thirds
-check "batch 3-way split of 2 -> 200" 200 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT2 entries="$E3")")"
+check "batch with no credential -> 403" 403 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT2 entries="$E3")")"
+# Maya splits for the whole table: being on the bill is what the sheet needs
+check "batch 3-way split of 2 -> 200" 200 "$(postt $STOK $BASE/api/claims/batch "$(json item_id=$SIT2 entries="$E3")")"
 check "all three claims landed"       3 "$(curl -s $BASE/api/bills/$SBILL | python3 -c "import json,sys;d=json.load(sys.stdin);print(len([c for c in d['claims'] if c['item_id']=='$SIT2']))")"
-check "batch over-claim -> 400"       400 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT2 entries="$EOVER")")"
+check "batch over-claim -> 400"       400 "$(postt $STOK $BASE/api/claims/batch "$(json item_id=$SIT2 entries="$EOVER")")"
 # Re-splitting replaces the batch's own claims instead of stacking on them
-check "batch re-split replaces -> 200" 200 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT2 entries="$ERESPLIT")")"
+check "batch re-split replaces -> 200" 200 "$(postt $STOK $BASE/api/claims/batch "$(json item_id=$SIT2 entries="$ERESPLIT")")"
 check "replaced share is 0.5"         "0.5" "$(curl -s $BASE/api/bills/$SBILL | python3 -c "import json,sys;d=json.load(sys.stdin);print([c['share'] for c in d['claims'] if c['item_id']=='$SIT2' and c['participant_id']=='$SP1'][0])")"
-check "foreign participant -> 400"    400 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT2 entries="$EFOREIGN")")"
-check "batch split of single item"    200 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT1 entries="$ESINGLE")")"
-check "empty entries -> 400"          400 "$(post - $BASE/api/claims/batch "$(json item_id=$SIT1 entries='[]')")"
+check "foreign participant -> 400"    400 "$(postt $STOK $BASE/api/claims/batch "$(json item_id=$SIT2 entries="$EFOREIGN")")"
+check "batch split of single item"    200 "$(postt $STOK $BASE/api/claims/batch "$(json item_id=$SIT1 entries="$ESINGLE")")"
+check "empty entries -> 400"          400 "$(postt $STOK $BASE/api/claims/batch "$(json item_id=$SIT1 entries='[]')")"
 curl -s -o /dev/null -X DELETE $BASE/api/bills/$SBILL -H "X-Creator-Token: $SCT"
 
 echo; echo "== custom dollar tip =="

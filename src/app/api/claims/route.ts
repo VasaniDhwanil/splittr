@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clampNumber, LIMITS } from '@/lib/validate';
+import { canEditClaims } from '@/lib/auth-helpers';
+
+const NOT_ON_BILL = 'Join this bill to change who had what';
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,6 +37,10 @@ export async function POST(request: NextRequest) {
         { error: 'Participant and item do not belong to the same bill' },
         { status: 400 }
       );
+    }
+
+    if (!(await canEditClaims(request, item.bill_id, supabase))) {
+      return NextResponse.json({ error: NOT_ON_BILL, code: 'not_on_bill' }, { status: 403 });
     }
 
     if (Number(item.quantity) === 1) {
@@ -118,6 +125,18 @@ export async function DELETE(request: NextRequest) {
         { error: 'participant_id and item_id are required' },
         { status: 400 }
       );
+    }
+
+    const { data: item } = await db
+      .from('bill_items')
+      .select('bill_id')
+      .eq('id', item_id)
+      .maybeSingle();
+    if (!item) {
+      return NextResponse.json({ error: 'Item not found' }, { status: 404 });
+    }
+    if (!(await canEditClaims(request, item.bill_id, supabase))) {
+      return NextResponse.json({ error: NOT_ON_BILL, code: 'not_on_bill' }, { status: 403 });
     }
 
     const { error } = await db

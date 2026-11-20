@@ -121,6 +121,8 @@ test.describe('bill realtime (writes)', () => {
 
       const participantKey = `splittr-participant-${b.id}`;
       let participantId = '';
+      // Claims need proof of being on the bill: the token issued at join
+      let participantToken = '';
       await test.step('guest joins as "Probe Guest"', async () => {
         // Join through the API from inside B so B owns the participant identity.
         // (Driving the join dialog here once produced a second "Probe Guest (2)"
@@ -133,13 +135,22 @@ test.describe('bill realtime (writes)', () => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ bill_id: billId, name }),
             });
-            return { status: r.status, body: (await r.json()) as { id?: string; name?: string } };
+            return {
+              status: r.status,
+              body: (await r.json()) as { id?: string; name?: string; participant_token?: string },
+            };
           },
           { billId: b.id, name: GUEST }
         );
         expect(joined.status, 'POST /api/participants').toBe(200);
         expect(joined.body.name, 'guest joined under the exact name').toBe(GUEST);
+        participantToken = joined.body.participant_token ?? '';
+        expect(participantToken, 'join returns a participant token').not.toBe('');
         await guestPage.evaluate(([k, v]) => localStorage.setItem(k, v), [participantKey, joined.body.id ?? '']);
+        await guestPage.evaluate(
+          ([k, v]) => localStorage.setItem(k, v),
+          [`splittr-participant-token-${joined.body.id ?? ''}`, participantToken]
+        );
         await guestPage.reload();
         participantId = (await guestPage.evaluate((k) => localStorage.getItem(k), participantKey)) ?? '';
         expect(participantId).not.toBe('');
@@ -151,15 +162,15 @@ test.describe('bill realtime (writes)', () => {
 
       await test.step('guest claims the burger; host sees it live', async () => {
         const res = await guestPage.evaluate(
-          async ({ participant_id, item_id }) => {
+          async ({ participant_id, item_id, token }) => {
             const r = await fetch('/api/claims', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', 'X-Participant-Token': token },
               body: JSON.stringify({ participant_id, item_id, share: 1 }),
             });
             return r.status;
           },
-          { participant_id: participantId, item_id: burgerId! }
+          { participant_id: participantId, item_id: burgerId!, token: participantToken }
         );
         expect(res, 'POST /api/claims').toBe(200);
         await expect(guestMarkerOnHost.first()).toBeVisible(LIVE);
@@ -167,12 +178,15 @@ test.describe('bill realtime (writes)', () => {
 
       await test.step('guest unclaims; host drops it live (DELETE path)', async () => {
         const res = await guestPage.evaluate(
-          async ({ participant_id, item_id }) => {
+          async ({ participant_id, item_id, token }) => {
             const q = new URLSearchParams({ participant_id, item_id });
-            const r = await fetch(`/api/claims?${q}`, { method: 'DELETE' });
+            const r = await fetch(`/api/claims?${q}`, {
+              method: 'DELETE',
+              headers: { 'X-Participant-Token': token },
+            });
             return r.status;
           },
-          { participant_id: participantId, item_id: burgerId! }
+          { participant_id: participantId, item_id: burgerId!, token: participantToken }
         );
         expect(res, 'DELETE /api/claims').toBe(200);
         await expect(guestMarkerOnHost).toHaveCount(0, LIVE);

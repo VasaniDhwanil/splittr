@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clampNumber, LIMITS } from '@/lib/validate';
+import { canEditClaims } from '@/lib/auth-helpers';
 
 interface BatchEntry {
   participant_id: string;
@@ -12,6 +14,7 @@ interface BatchEntry {
 // no per-claim ordering races between the N claims of a single split.
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createClient(); // auth (cookies) only
     const db = createAdminClient(); // data ops — bypasses RLS once the service key is set
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {
@@ -63,6 +66,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Participants and item do not belong to the same bill' },
         { status: 400 }
+      );
+    }
+
+    if (!(await canEditClaims(request, item.bill_id, supabase))) {
+      return NextResponse.json(
+        { error: 'Join this bill to change who had what', code: 'not_on_bill' },
+        { status: 403 }
       );
     }
 
