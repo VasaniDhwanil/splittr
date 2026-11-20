@@ -148,6 +148,39 @@ of `supabase db diff --linked`, which needs the database password.)
     access token returns no user. The proxy and every route use `getUser()`,
     so the spec's "valid for up to an hour" caveat (D10) does not apply here.
     It would apply to code that trusted the JWT locally (`getClaims()`).
+20. **Order inside `/api/mcp`:** 503, foreign `Origin` (403), token in the
+    URL, then 405 for every method but POST, then the Authorization header.
+    So a GET with a token in its URL still revokes that token, and a GET
+    without one answers 405 rather than 401.
+21. **Failed-auth counter:** 30 failures a minute per `x-real-ip`, in memory.
+    Past that, failures answer 429 instead of 401 (still after the lookup).
+    A valid token never touches the counter and is never refused because of
+    it. It limits noise; it does not save the lookup.
+22. **Errors are JSON-RPC envelopes** (`{ jsonrpc, error: { code, message,
+    data: { reason } }, id: null }`) for every pipeline refusal, with
+    `Cache-Control: no-store`. Non-Bearer schemes count as "missing".
+23. **Unknown-tool audit rows** store the tool name `(unknown)`, not the name
+    the caller sent, so out-of-scope and nonexistent tools are
+    indistinguishable in the log as well as in the response.
+24. **Group bills filed by a non-member are visible to current members**
+    (spec D7: P1 blocks and remediates planting; D7 deliberately does not
+    require the creator to still be a member). Unpublished ones never are.
+    If that stops being acceptable, the check belongs in `findRelatedBills`
+    and `findRelatedBill` (authz.ts), and the T-AUTHZ matrix has the row.
+25. **Query shape:** three scoped queries merged in code (created by the
+    actor; inner join on the actor's participant row; `group_id in` the
+    actor's current groups), each carrying the published filter. A bill is
+    re-checked against the relation in code as a second layer. Detail reads
+    (items, participants, claims) only accept bills the finders returned.
+26. **`status` filter of `list_my_bills` is literal** (`active` does not
+    include `draft`). `list_my_expenses` and `list_my_bills` read at most
+    PostgREST's 1000 rows per source; balances read all unsettled related
+    bills in one go, which is fine at this size but not paged.
+27. **Tool results carry the data twice:** as JSON text in `content` and as
+    `structuredContent` (no `outputSchema` is declared).
+28. **`paid` on a person** is the raw payment status of their row; the person
+    collecting is not marked paid. `my_payment_status` is `not_applicable`
+    for the collector.
 
 ## Works before and after the migration
 
