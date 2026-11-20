@@ -18,6 +18,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['tests/setup.ts'],
     include: ['tests/**/*.test.{ts,tsx}'],
+    // Server tests need the local database: `npm run test:server`
+    exclude: ['tests/server/**'],
     css: false,
   },
 });
