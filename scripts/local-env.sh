@@ -23,6 +23,8 @@ export SUPABASE_SERVICE_ROLE_KEY="$(_splittr_get SERVICE_ROLE_KEY)"
 export MCP_ENABLED=true
 export AGENT_TOKEN_PEPPER="local-test-pepper-0123456789-abcdefghijk"
 export NEXT_PUBLIC_SITE_URL=http://localhost:3199
+export OAUTH_ISSUER=http://localhost:3199
+export MCP_OAUTH_ENABLED=true
 export RESEND_API_KEY=""
 export ANTHROPIC_API_KEY=""
 

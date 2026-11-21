@@ -14,6 +14,8 @@ process.env.TEST_DATABASE_URL = env.dbUrl;
 // A shell that sourced scripts/local-env.sh (to run the dev server or a build)
 // exports a localhost site URL; tests expect the production default.
 delete process.env.NEXT_PUBLIC_SITE_URL;
+delete process.env.OAUTH_ISSUER;
+delete process.env.MCP_OAUTH_ENABLED;
 
 // Nothing in a test may reach a real third party.
 delete process.env.RESEND_API_KEY;
