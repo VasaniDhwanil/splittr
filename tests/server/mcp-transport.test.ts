@@ -267,6 +267,48 @@ describe('Origin and method', () => {
   });
 });
 
+describe('batches and unparseable bodies', () => {
+  const auditCount = async () => Number((await sql<{ n: string }>('select count(*) n from agent_audit_log'))[0].n);
+  const billCount = async () => Number((await sql<{ n: string }>('select count(*) n from bills'))[0].n);
+
+  it('refuses a batch of 61 tool calls with 400 and -32600 before any tool runs', async () => {
+    const batch = Array.from({ length: 61 }, () => rpcBody('tools/call', { name: 'list_my_groups', arguments: {} }));
+    const [auditBefore, billsBefore] = [await auditCount(), await billCount()];
+    const res = await send(batch, { token });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe(-32600);
+    expect(json.error.message).toMatch(/batch/i);
+    expect(json.error.message).toMatch(/one request at a time/i);
+    expect(await auditCount()).toBe(auditBefore);
+    expect(await billCount()).toBe(billsBefore);
+  });
+
+  it('a batch of two create_bill calls creates nothing', async () => {
+    const writer = await insertToken(user, { scopes: ['read', 'bills:write'] });
+    const call = () =>
+      rpcBody('tools/call', { name: 'create_bill', arguments: { name: 'Batch', items: [{ name: 'a', price: 5, quantity: 1 }] } });
+    const [auditBefore, billsBefore] = [await auditCount(), await billCount()];
+    const res = await send([call(), call()], { token: writer.token });
+    expect(res.status).toBe(400);
+    expect(await billCount()).toBe(billsBefore);
+    expect(await auditCount()).toBe(auditBefore);
+  });
+
+  it('an unparseable body is a 400 JSON-RPC parse error', async () => {
+    const res = await send(null, { token, raw: '{not json' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe(-32700);
+  });
+
+  it('single requests still work, and the 64 KiB limit still holds', async () => {
+    expect((await send(rpcBody('tools/list'), { token })).status).toBe(200);
+    expect((await callTool(token, 'list_my_groups')).status).toBe(200);
+    const big = await send(null, { token, raw: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', pad: 'x'.repeat(70_000) }) });
+    expect(big.status).toBe(413);
+  });
+});
+
 describe('JSON-RPC', () => {
   it('initialize carries the instructions', async () => {
     const res = await send(initializeBody(), { token });

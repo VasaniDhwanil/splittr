@@ -22,7 +22,7 @@ import { hashAgentToken, isAgentAccessEnabled, isWellFormedAgentToken } from '@/
 import { sendEmail } from '@/lib/email';
 import { rateLimit } from '@/lib/rate-limit';
 import { siteOrigin } from '@/lib/site-origin';
-import { serveMcp } from './server';
+import { MAX_BODY_BYTES, serveMcp } from './server';
 
 export const CALLS_PER_MINUTE = 60;
 /** Failed authentications per address per minute before answers turn into 429. Valid tokens are never counted. */
@@ -119,6 +119,41 @@ async function revokeLeakedTokens(request: Request, tokens: string[]): Promise<b
   return revokedAny;
 }
 
+/**
+ * Reads at most MAX_BODY_BYTES. The transport would accept a JSON-RPC batch of
+ * up to 100 messages for the price of one rate-limit hit, so the endpoint
+ * parses the body itself and refuses arrays before the transport sees them.
+ */
+async function readJsonBody(request: Request): Promise<{ ok: true; body: unknown } | { ok: false; response: Response }> {
+  const tooLarge = () => ({
+    ok: false as const,
+    response: respond(413, -32000, `Request body too large: the limit is ${MAX_BODY_BYTES} bytes.`, { reason: 'too_large' }),
+  });
+  const declared = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return tooLarge();
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = request.body?.getReader();
+  if (reader) {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => {});
+        return tooLarge();
+      }
+      chunks.push(value);
+    }
+  }
+  try {
+    return { ok: true, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) };
+  } catch {
+    return { ok: false, response: respond(400, -32700, 'Parse error: Invalid JSON', { reason: 'parse_error' }) };
+  }
+}
+
 function bearerToken(request: Request): string | null {
   const header = request.headers.get('authorization');
   if (!header) return null;
@@ -168,7 +203,13 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       });
     }
 
-    const response = await serveMcp(request, actor, ip);
+    const parsed = await readJsonBody(request);
+    if (!parsed.ok) return parsed.response;
+    if (Array.isArray(parsed.body)) {
+      return respond(400, -32600, 'Batches are not supported. Send one request at a time.', { reason: 'batch_not_supported' });
+    }
+
+    const response = await serveMcp(request, actor, ip, parsed.body);
     const headers = new Headers(response.headers);
     headers.set('Cache-Control', 'no-store');
     headers.delete('set-cookie');

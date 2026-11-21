@@ -80,7 +80,7 @@ export function buildMcpServer(actor: Actor, ip: string): Server {
 }
 
 /** Runs one JSON-RPC exchange: stateless, one response, nothing kept afterwards. */
-export async function serveMcp(request: Request, actor: Actor, ip: string): Promise<Response> {
+export async function serveMcp(request: Request, actor: Actor, ip: string, parsedBody?: unknown): Promise<Response> {
   const server = buildMcpServer(actor, ip);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -90,7 +90,7 @@ export async function serveMcp(request: Request, actor: Actor, ip: string): Prom
   transport.onerror = () => {};
   try {
     await server.connect(transport);
-    return await transport.handleRequest(request);
+    return await transport.handleRequest(request, { parsedBody });
   } finally {
     await server.close().catch(() => {});
   }
