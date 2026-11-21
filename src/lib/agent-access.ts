@@ -104,11 +104,27 @@ export function requestIp(request: Request): string {
   return request.headers.get('x-real-ip')?.trim() || 'unknown';
 }
 
-/** The browser's Origin must be this site. A missing Origin is refused: browsers always send it on these requests. */
+const isLocalOrigin = (origin: string) => {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The browser's Origin must be this site: the request's own origin, or one of
+ * the site's known origins. ALLOWED_ORIGINS also lists localhost for the
+ * sign-in handoff; that entry only counts outside production. A missing
+ * Origin is refused: browsers always send it on these requests.
+ */
 export function isSameSiteOrigin(request: Request): boolean {
   const origin = request.headers.get('origin');
   if (!origin) return false;
-  return origin === new URL(request.url).origin || ALLOWED_ORIGINS.has(origin);
+  if (origin === new URL(request.url).origin) return true;
+  if (!ALLOWED_ORIGINS.has(origin)) return false;
+  return !isLocalOrigin(origin) || process.env.NODE_ENV !== 'production';
 }
 
 export function noStore(res: NextResponse): NextResponse {

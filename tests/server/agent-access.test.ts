@@ -138,6 +138,34 @@ describe('request helpers', () => {
     expect(isSameSiteOrigin(req({}))).toBe(false);
   });
 
+  describe('Origin against the request URL and the environment', () => {
+    const at = (url: string, origin: string) => new Request(url, { method: 'POST', headers: { origin } });
+    const PROD = 'https://www.splittr.cash/api/agent-tokens';
+    afterEach(() => vi.unstubAllEnvs());
+
+    it('production URL: its own origin passes, localhost and strangers do not', () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      expect(isSameSiteOrigin(at(PROD, 'https://www.splittr.cash'))).toBe(true);
+      expect(isSameSiteOrigin(at(PROD, 'https://splittr.cash'))).toBe(true);
+      expect(isSameSiteOrigin(at(PROD, 'http://localhost:3000'))).toBe(false);
+      expect(isSameSiteOrigin(at(PROD, 'https://evil.example'))).toBe(false);
+    });
+
+    it('outside production the allow-listed localhost origin is accepted for any URL', () => {
+      vi.stubEnv('NODE_ENV', 'development');
+      expect(isSameSiteOrigin(at(PROD, 'http://localhost:3000'))).toBe(true);
+      expect(isSameSiteOrigin(at(PROD, 'https://evil.example'))).toBe(false);
+    });
+
+    it('a request on its own origin passes in any mode, even a localhost one that is not allow-listed', () => {
+      for (const mode of ['production', 'development', 'test']) {
+        vi.stubEnv('NODE_ENV', mode);
+        expect(isSameSiteOrigin(at('http://localhost:3199/api/x', 'http://localhost:3199')), mode).toBe(true);
+        expect(isSameSiteOrigin(at('http://localhost:3199/api/x', 'http://localhost:3000')) , mode).toBe(mode !== 'production');
+      }
+    });
+  });
+
   it('takes the address from x-real-ip, not from the forwarded chain', () => {
     expect(requestIp(req({ 'x-real-ip': '9.9.9.9', 'x-forwarded-for': '6.6.6.6' }))).toBe('9.9.9.9');
     expect(requestIp(req({ 'x-forwarded-for': '6.6.6.6' }))).toBe('unknown');
