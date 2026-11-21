@@ -13,6 +13,24 @@ describe('session proxy matcher', () => {
     expect(runsOn('/api/mcp/anything')).toBe(false);
   });
 
+  it('skips the OAuth token and revocation endpoints and the discovery documents', () => {
+    for (const url of [
+      '/api/oauth/token',
+      '/api/oauth/revoke',
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/oauth-protected-resource',
+      '/.well-known/oauth-protected-resource/api/mcp',
+    ]) {
+      expect(runsOn(url), url).toBe(false);
+    }
+  });
+
+  it('still covers the OAuth pages and the session-bound consent APIs', () => {
+    for (const url of ['/oauth/authorize', '/oauth/consent/abc', '/api/agent-oauth/requests/abc', '/api/agent-oauth/requests/abc/approve', '/api/oauthish', '/profile']) {
+      expect(runsOn(url), url).toBe(true);
+    }
+  });
+
   it('still covers pages and the cookie-authenticated API', () => {
     expect(runsOn('/')).toBe(true);
     expect(runsOn('/profile')).toBe(true);

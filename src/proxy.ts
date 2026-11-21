@@ -46,7 +46,9 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     // /api/mcp is left out on purpose: it authenticates with a bearer token
-    // only, and must never read or set session cookies.
-    '/((?!api/mcp|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // only, and must never read or set session cookies. So are the OAuth
+    // token and revocation endpoints and the discovery documents. The
+    // session-bound consent APIs (/api/agent-oauth) and /oauth/* pages stay in.
+    '/((?!api/mcp|api/oauth/|\\.well-known/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
