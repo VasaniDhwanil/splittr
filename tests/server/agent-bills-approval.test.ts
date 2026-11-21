@@ -3,7 +3,7 @@ import { GET } from '@/app/api/agent-bills/[id]/route';
 import { POST as approve } from '@/app/api/agent-bills/[id]/approve/route';
 import { POST as decline } from '@/app/api/agent-bills/[id]/decline/route';
 import { GET as billGet } from '@/app/api/bills/[id]/route';
-import { enableAgentAccess, insertProposal, insertToken } from './helpers/agent';
+import { enableAgentAccess, insertToken } from './helpers/agent';
 import { createGroup, createUser, db, params, request, uuid } from './helpers/db';
 import { callTool } from './helpers/mcp';
 import { signInAs, signOut, type TestUser } from './helpers/session';

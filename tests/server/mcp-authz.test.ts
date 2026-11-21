@@ -17,7 +17,7 @@ interface World {
   tokens: Record<Who, string>;
   groupId: string;
   otherGroupId: string;
-  bills: Record<'own' | 'claimed' | 'group' | 'planted' | 'groupUnpublished' | 'ownUnpublished', string>;
+  bills: Record<'own' | 'claimed' | 'group' | 'planted' | 'ownUnpublished', string>;
   ghost: string;
 }
 
@@ -39,12 +39,7 @@ async function buildWorld(): Promise<World> {
 
   const groupBill = await createBill({ creator: owner, name: 'Group lunch', groupId: group.id });
   const planted = await createBill({ creator: outsider, name: 'Planted bill', groupId: group.id });
-  const groupUnpublished = await createBill({
-    creator: owner,
-    name: 'Group draft',
-    groupId: group.id,
-    extra: { approval_required: true, approved_at: null },
-  });
+  // (An unapproved bill in a group no longer exists: the database refuses it, see agent-bills-approval.test.ts)
   const ownUnpublished = await createBill({ creator, name: 'Waiting', extra: { approval_required: true, approved_at: null } });
 
   const users = { creator, linked, claimedCreator, member, former, stranger, otherGroup, owner, outsider };
@@ -62,7 +57,6 @@ async function buildWorld(): Promise<World> {
       claimed: claimed.id,
       group: groupBill.id,
       planted: planted.id,
-      groupUnpublished: groupUnpublished.id,
       ownUnpublished: ownUnpublished.id,
     },
     ghost: uuid(),
@@ -100,7 +94,7 @@ const CAN_EXPENSE: Record<Who, BillKey[]> = {
 };
 
 const WHO = Object.keys(CAN_OPEN) as Who[];
-const BILL_KEYS = ['own', 'claimed', 'group', 'planted', 'groupUnpublished', 'ownUnpublished'] as BillKey[];
+const BILL_KEYS = ['own', 'claimed', 'group', 'planted', 'ownUnpublished'] as BillKey[];
 
 describe('get_bill', () => {
   for (const who of WHO) {
@@ -129,7 +123,7 @@ describe('get_bill', () => {
 
   it('unpublished bills are hidden from everyone, their own creator included', async () => {
     for (const who of WHO) {
-      for (const key of ['groupUnpublished', 'ownUnpublished'] as BillKey[]) {
+      for (const key of ['ownUnpublished'] as BillKey[]) {
         const res = await callTool(w.tokens[who], 'get_bill', { bill_id: w.bills[key] });
         expect(res.isError).toBe(true);
       }
