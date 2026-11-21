@@ -250,6 +250,22 @@ of `supabase db diff --linked`, which needs the database password.)
     fields (it used to return whatever its column list named), built from
     `select('*')` so it works before migration 017.
 
+## Launch checklist
+
+Before turning the feature on in production (`MCP_ENABLED=true` plus the
+pepper):
+
+1. Apply migration 017 (and 015 and 016 before it, if not yet applied).
+2. Confirm the nightly prune job exists:
+   `SELECT 1 FROM cron.job WHERE jobname = 'prune-agent-access'`. It must
+   return a row. If it does not (pg_cron missing or the schedule failed), the
+   audit log and rate-limit tables grow without bound: schedule
+   `SELECT public.prune_agent_access()` some other way (for example a Supabase
+   scheduled function or an external cron calling it with the service role)
+   before enabling the feature.
+3. Set `AGENT_TOKEN_PEPPER` (at least 32 bytes) and `RESEND_API_KEY`.
+4. Make one token, make a proposal with it, approve it, revoke the token.
+
 ## Works before and after the migration
 
 - `isPublished(bill)` (new, `src/lib/bill-visibility.ts`): true unless

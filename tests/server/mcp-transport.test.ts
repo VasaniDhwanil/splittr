@@ -20,6 +20,7 @@ vi.mock('@/lib/email', async (importOriginal) => {
 import { GET as billsMine } from '@/app/api/bills/mine/route';
 import { generateAgentToken } from '@/lib/agent-tokens';
 import { enableAgentAccess, insertToken, TEST_PEPPER } from './helpers/agent';
+import { MCP_LIMITS } from '@/lib/mcp/endpoint';
 import { createUser, db, request, sql } from './helpers/db';
 import { callTool, initializeBody, mcpRequest, rpcBody, send } from './helpers/mcp';
 import { signInAs, signOut, type TestUser } from './helpers/session';
@@ -422,6 +423,28 @@ describe('rate limits', () => {
 
     expect((await send(rpcBody('tools/list'), { ip, token })).status).toBe(200);
     expect((await callTool(token, 'list_my_groups', {}, ip)).status).toBe(200);
+  });
+
+  it('caps an account at a daily number of calls across all its tokens, with a clear 429', async () => {
+    const original = MCP_LIMITS.callsPerDay;
+    MCP_LIMITS.callsPerDay = 3;
+    try {
+      const second = await insertToken(user);
+      expect((await send(rpcBody('tools/list'), { token })).status).toBe(200);
+      expect((await send(rpcBody('tools/list'), { token: second.token })).status).toBe(200);
+      expect((await send(rpcBody('tools/list'), { token })).status).toBe(200);
+      const res = await send(rpcBody('tools/list'), { token: second.token });
+      expect(res.status).toBe(429);
+      expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
+      expect((await res.json()).error.message).toMatch(/daily limit/i);
+      // another account is unaffected
+      const other = await createUser('other');
+      const otherToken = await insertToken(other);
+      expect((await send(rpcBody('tools/list'), { token: otherToken.token })).status).toBe(200);
+    } finally {
+      MCP_LIMITS.callsPerDay = original;
+    }
+    expect(MCP_LIMITS.callsPerDay).toBe(2000);
   });
 
   it('garbage tokens cause no database writes', async () => {

@@ -25,6 +25,8 @@ import { siteOrigin } from '@/lib/site-origin';
 import { MAX_BODY_BYTES, serveMcp } from './server';
 
 export const CALLS_PER_MINUTE = 60;
+/** Mutable only so a test can lower the daily cap; nothing in the app writes to it. */
+export const MCP_LIMITS = { callsPerDay: 2000 };
 /** Failed authentications per address per minute before answers turn into 429. Valid tokens are never counted. */
 export const FAILED_AUTH_PER_MINUTE = 30;
 
@@ -200,6 +202,14 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       return respond(429, -32002, 'Too many requests. This token may make 60 calls a minute.', {
         reason: 'rate_limited',
         headers: { 'Retry-After': String(Math.max(1, limit.retryAfter)) },
+      });
+    }
+
+    const daily = await hitRateLimit(`mcp-day:${actor.userId}`, MCP_LIMITS.callsPerDay, 86400);
+    if (!daily.allowed) {
+      return respond(429, -32002, 'The daily limit of calls for this account was reached. Try again tomorrow.', {
+        reason: 'daily_limit',
+        headers: { 'Retry-After': String(Math.max(1, daily.retryAfter)) },
       });
     }
 
