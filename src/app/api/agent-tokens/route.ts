@@ -117,12 +117,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { count: active } = await db
-      .from('agent_tokens')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .is('revoked_at', null)
-      .gt('expires_at', new Date().toISOString());
+    // Only personal tokens count: OAuth grants have their own cap (migration
+    // 019). Before 019 the column does not exist (42703): everything is personal.
+    const countActive = (personalOnly: boolean) => {
+      const query = db
+        .from('agent_tokens')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .is('revoked_at', null)
+        .gt('expires_at', new Date().toISOString());
+      return personalOnly ? query.eq('kind', 'pat') : query;
+    };
+    let { count: active, error: countError } = await countActive(true);
+    if (countError?.code === '42703') ({ count: active, error: countError } = await countActive(false));
+    if (countError) {
+      console.error('agent-tokens count failed:', countError.code);
+      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    }
     if ((active ?? 0) >= MAX_ACTIVE_TOKENS) {
       return NextResponse.json(
         { error: `You already have ${MAX_ACTIVE_TOKENS} active tokens. Revoke one first.`, code: 'token_limit' },

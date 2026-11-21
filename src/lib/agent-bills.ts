@@ -59,7 +59,12 @@ export async function deleteUnapprovedProposals(tokenIds: string[]): Promise<voi
 /** True when the proposal's token row is revoked: such a proposal is not approvable and looks missing. A deleted token row (pruned after expiry) is not a revocation. */
 export async function proposalTokenRevoked(agentTokenId: string | null): Promise<boolean> {
   if (!agentTokenId) return false;
-  const { data, error } = await createAdminClient().from('agent_tokens').select('revoked_at').eq('id', agentTokenId).maybeSingle();
+  const { data, error } = await createAdminClient()
+    .from('agent_tokens')
+    .select('revoked_at, revoked_reason')
+    .eq('id', agentTokenId)
+    .maybeSingle();
   if (error) throw new Error('token read failed');
-  return data?.revoked_at != null;
+  // A connection replaced by a newer one is not distrusted: its proposals stay (docs/specs/mcp-oauth.md A7)
+  return data?.revoked_at != null && data.revoked_reason !== 'replaced';
 }
