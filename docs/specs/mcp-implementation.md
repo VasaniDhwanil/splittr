@@ -249,6 +249,60 @@ of `supabase db diff --linked`, which needs the database password.)
 39. **`/api/bills/mine`** returns an explicit field list plus the three new
     fields (it used to return whatever its column list named), built from
     `select('*')` so it works before migration 017.
+40. **The endpoint reads the body itself** (after the per-token and daily
+    limits), caps it at 64 KiB (413), parses it (400 / -32700) and refuses any
+    JSON array with 400 / -32600 "Batches are not supported", then hands the
+    parsed body to the transport. One HTTP request is one call.
+41. **Daily cap per account:** `hitRateLimit('mcp-day:<user>', 2000, 86400)`,
+    checked right after the per-minute limit. The limit lives in the mutable
+    `MCP_LIMITS` object in `src/lib/mcp/endpoint.ts` only so a test can lower it.
+42. **Sanitiser:** also strips variation selectors (U+FE00-FE0E,
+    U+E0100-E01EF), directional marks, U+00AD, U+034F, U+180E and the Hangul
+    fillers. U+FE0F survives only after `\p{Extended_Pictographic}` or before
+    U+20E3 (keycaps).
+43. **Revocation removes proposals:** `deleteUnapprovedProposals(tokenIds)`
+    (`src/lib/agent-bills.ts`) runs from single revoke, `revoke-all`,
+    `revoke-link` and the query-string auto-revoke. `findProposal` treats a
+    proposal whose token row is revoked as missing, so GET, approve and decline
+    answer 404. The check is a separate read before the conditional update
+    (PostgREST has no subquery filter); a revoke that lands between the two is
+    ordered after the approval. A proposal whose token row no longer exists
+    (pruned after expiry) is not treated as revoked.
+44. **Query-string tokens** are counted against the in-memory per-IP failed-auth
+    counter before any lookup; once the address is over the limit the database
+    is skipped and the answer is still 401. (Amends 21.) A live token on a
+    fresh address is still revoked on first sighting; from an address already
+    over the limit it is not looked up until the counter clears.
+45. **A database error while resolving a token** is `unavailable`: 503 with
+    `Retry-After`, a body saying the token is fine, and no failed-auth count. A
+    thrown exception still ends in the generic 500.
+46. **`revoke-link` expires** 30 days after the creation of the token it was
+    sent for (`created_at` of the row whose hash matches), then answers 404.
+    While valid it still revokes every unrevoked token of the owner. (Amends 17.)
+47. **Origin:** `isSameSiteOrigin` accepts the request's own origin and the
+    non-localhost entries of `ALLOWED_ORIGINS`; localhost entries only when
+    `NODE_ENV !== 'production'`. (Amends 15 and the contracts section.)
+48. **A proposal never has a group:** CHECK `bills_proposal_has_no_group` in
+    migration 017 (`NOT (approval_required AND approved_at IS NULL AND group_id
+    IS NOT NULL)`).
+49. **`get_balances` names:** the name the counterparty typed on the most recent
+    bill in scope; their profile display name only when the actor and the
+    counterparty are both current members of at least one common group.
+    Handles still come from the profile, only when the actor owes.
+50. **Look-alike names:** counterparties' names are compared after NFKC,
+    lowercasing and removing all whitespace; a name mixing Latin letters with
+    Cyrillic or Greek letters gets no `pay_with`, with a note. **Known
+    remaining gap:** a name written entirely in look-alike letters of one
+    script (for example an all-Cyrillic name that reads like a Latin one) is
+    not caught, since it does not collide after NFKC and does not mix scripts.
+51. **Test helper `sql()`** has `lock_timeout` 8 s and `statement_timeout` 15 s
+    and says which one fired.
+52. **Both database states are tested for real.** `supabase db reset --version
+    016` builds a database with migrations up to 016 only; the Phase 0 files,
+    `proxy-matcher`, `agent-session-after-signout` and
+    `web-paths-before-017.test.ts` (ordinary web paths, no 017 column named)
+    pass there, and the feature files fail there by design. Restore with
+    `npm run db:reset`.
 
 ## Launch checklist
 

@@ -268,16 +268,20 @@ token's scopes allow; an out-of-scope call errors with no side effects.
 - Profile page: list tokens (name, scopes, last4, created, expires, last used
   time and IP); revoke one; revoke all.
 - The notification email's link opens a page that revokes only on a confirmed
-  POST (mail scanners pre-fetch GET links). (A16)
+  POST (mail scanners pre-fetch GET links). (A16) The link works for 30 days
+  after the token it was sent for was created, then answers 404 like an
+  unknown secret; while valid it revokes all of the owner's unrevoked tokens,
+  newer ones included, and deletes their unapproved proposals. (R7, R4)
 - "Revoke all" also ends the user's sessions. From the profile page (signed
   in), call Supabase global sign-out with the user's own JWT. From the email
   page (reached without a session, by design), Supabase's admin sign-out needs
   a JWT we don't have, so that page revokes tokens and then asks the user to
   sign in and press "sign out everywhere"; if implementation confirms a
   user-id-based admin logout or a short `ban_duration` works cleanly, use that
-  instead. Already-issued access JWTs stay valid until they expire (1 hour by
-  default); this is documented as accepted residual risk unless the
-  verification test shows otherwise. (B6)
+  instead. The caveat that already-issued access JWTs stay valid for up to an
+  hour does not apply to this app: tested, `getUser()` rejects a previously
+  issued access token after a global sign-out (the proxy and every route use
+  `getUser()`, never a locally verified JWT). (B6)
 - Operator kill switch: `MCP_ENABLED=false` makes `/api/mcp` return 503;
   a documented SQL statement revokes every token.
 - Check that Supabase "Secure email change" is on: email compromise is full
@@ -687,3 +691,34 @@ environment matrix and fail-closed pepper; the localhost test guard; the
 revoke-all split; D7's simplified relation; CSRF protection on the approval
 POST; leaked approval URLs being useless without the user's session; the
 reasoning for not adopting an LLM classifier.
+
+Round 4 (implementation review: a separate reviewer tried to break the built feature):
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| R1 JSON-RPC batches (up to 100 messages) ran under one rate-limit hit | High | The endpoint reads and parses the body itself (64 KiB cap kept) and answers 400 / -32600 to any array before a tool runs; unparseable bodies are 400 / -32700; the parsed body goes to the transport |
+| R2 audit log growth with no account-level ceiling | Medium | 2000 MCP calls a day per account (`mcp-day:<user>`), 429 with `Retry-After`; launch checklist item to confirm the nightly prune job |
+| R3 sanitiser missed variation selectors, directional marks, soft hyphen, fillers | Medium | All stripped; U+FE0F kept only after an emoji-capable character (or before a keycap); U+200D kept |
+| R4 proposals from a revoked token stayed approvable | Low | One helper deletes a token's unapproved proposals from all four revocation paths; GET, approve and decline answer 404 for a revoked token's proposal; approved bills untouched |
+| R5 well-formed tokens in the query string reached the database unthrottled | Low | Counted against the per-IP failed-auth counter before any lookup; over the limit the database is skipped (still 401); a live token on a fresh address is still revoked on first sighting |
+| R6 a database error was reported as "token not recognised" | Low | `resolveAgentToken` returns `unavailable`; the endpoint answers 503 saying the token is fine |
+| R7 the "Not you?" link never expired | Low | 30 days from the token's creation, then 404; still revokes all unrevoked tokens while valid |
+| R8 production accepted `Origin: http://localhost:3000` on token and approval routes | Low | `isSameSiteOrigin` takes the request's own origin and the non-localhost allow-list; localhost entries only outside production; `ALLOWED_ORIGINS` unchanged |
+| R9 nothing stopped a proposal from having a group | Low | CHECK constraint `bills_proposal_has_no_group` in migration 017 |
+| R10 `get_balances` showed profile names the web would not show | Low | Typed name from the most recent bill in scope; profile name only when actor and counterparty are both current members of a common group |
+| R11 look-alike names defeated the duplicate-name rule | Low | Names compared after NFKC, lowercase and whitespace removal; names mixing Latin with Cyrillic or Greek get no handles. Remaining gap: a name written entirely in look-alike letters of one script |
+
+Test-quality fixes from the same round: T1 the query-level filters are now
+asserted on the recorded PostgREST requests (and shown to fail when a filter
+is removed); T2 `canEditClaims` is tested directly on proposed bills; T3
+migration 015's membership trigger is tested against group and account
+deletes; T4 the web and Phase 0 tests were run against a database holding
+migrations up to 016 only; T5 the `sql()` test helper has lock and statement
+timeouts.
+
+What held in round 4: no way found to read another account's data through the
+MCP read path; no way to see or approve a proposed bill without its owner; no
+plaintext token or code in the database or logs; no privilege leaks in
+migrations 015-017; the mint flow's lock, attempt cap and account-bound HMAC;
+no PostgREST filter string built from user input; identical not-found and
+unrelated responses; the circuit breaker not triggerable by a third party.
