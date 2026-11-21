@@ -28,7 +28,7 @@ import { POST as revokeAll } from '@/app/api/agent-tokens/revoke-all/route';
 import * as revokeLinkRoute from '@/app/api/agent-tokens/revoke-link/route';
 import { GET as authCallback } from '@/app/auth/callback/route';
 import { isWellFormedAgentToken, hashAgentToken } from '@/lib/agent-tokens';
-import { enableAgentAccess, insertToken, seedPending } from './helpers/agent';
+import { billExists, enableAgentAccess, insertProposal, insertToken, seedPending } from './helpers/agent';
 import { createUser, db, params, request } from './helpers/db';
 import { globalSignOut, signInAs, signOut, type TestUser } from './helpers/session';
 
@@ -512,6 +512,62 @@ describe('the revoke link in the email', () => {
     expect((await link(secret, { origin: 'https://evil.example' })).status).toBe(403);
     const { data } = await db().from('agent_tokens').select('revoked_at').eq('id', t.id).single();
     expect(data!.revoked_at).toBeNull();
+  });
+});
+
+describe('revocation deletes unapproved proposals', () => {
+  const revoke = (id: string) =>
+    call(revokeToken, 'DELETE', `/api/agent-tokens/${id}`, undefined, ORIGIN, params({ id }));
+  const secretFor = () => randomBytes(32).toString('base64url');
+
+  it('single revoke deletes that token proposals only, never approved bills or another token', async () => {
+    const a = await insertToken(user);
+    const b = await insertToken(user);
+    const pendingA = await insertProposal(user, a.id);
+    const approvedA = await insertProposal(user, a.id, { approved: true });
+    const pendingB = await insertProposal(user, b.id);
+    expect((await revoke(a.id)).status).toBe(200);
+    expect(await billExists(pendingA)).toBe(false);
+    expect(await billExists(approvedA)).toBe(true);
+    expect(await billExists(pendingB)).toBe(true);
+    // pressing it again changes nothing
+    expect((await revoke(a.id)).status).toBe(200);
+    expect(await billExists(approvedA)).toBe(true);
+  });
+
+  it('someone else cannot delete a proposal by revoking its token id', async () => {
+    const stranger = await createUser('stranger');
+    const theirs = await insertToken(stranger);
+    const pending = await insertProposal(stranger, theirs.id);
+    expect((await revoke(theirs.id)).status).toBe(404);
+    expect(await billExists(pending)).toBe(true);
+  });
+
+  it('revoke-all deletes the proposals of every token it revokes', async () => {
+    const a = await insertToken(user);
+    const b = await insertToken(user, { suspendedAt: new Date() });
+    const pendings = [await insertProposal(user, a.id), await insertProposal(user, b.id)];
+    const approved = await insertProposal(user, a.id, { approved: true });
+    const other = await createUser('bystander');
+    const theirs = await insertToken(other);
+    const theirPending = await insertProposal(other, theirs.id);
+    expect((await call(revokeAll, 'POST', '/api/agent-tokens/revoke-all')).status).toBe(200);
+    for (const id of pendings) expect(await billExists(id)).toBe(false);
+    expect(await billExists(approved)).toBe(true);
+    expect(await billExists(theirPending)).toBe(true);
+  });
+
+  it('the email link deletes the proposals of all the owner tokens', async () => {
+    const secret = secretFor();
+    const a = await insertToken(user, { revokeLinkHash: hashAgentToken(secret) });
+    const newer = await insertToken(user);
+    const pendings = [await insertProposal(user, a.id), await insertProposal(user, newer.id)];
+    const approved = await insertProposal(user, newer.id, { approved: true });
+    signOut();
+    const res = await call(revokeLinkRoute.POST, 'POST', '/api/agent-tokens/revoke-link', { secret });
+    expect(await res.json()).toEqual({ revoked: 2 });
+    for (const id of pendings) expect(await billExists(id)).toBe(false);
+    expect(await billExists(approved)).toBe(true);
   });
 });
 

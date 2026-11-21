@@ -32,8 +32,34 @@ export async function findProposal(userId: string, id: string): Promise<Proposal
     .is('approved_at', null)
     .maybeSingle();
   if (error) throw new Error('proposal read failed');
-  return data as Proposal | null;
+  const proposal = data as Proposal | null;
+  if (proposal && (await proposalTokenRevoked(proposal.agent_token_id))) return null;
+  return proposal;
 }
 
 export const isExpired = (proposal: Pick<Proposal, 'approval_expires_at'>) =>
   Date.parse(proposal.approval_expires_at) <= Date.now();
+
+/**
+ * Revoking a token takes its unapproved proposals with it: the owner should
+ * not be able to approve something a token they no longer trust proposed.
+ * Approved bills are never touched. Called from every place tokens are revoked.
+ */
+export async function deleteUnapprovedProposals(tokenIds: string[]): Promise<void> {
+  if (tokenIds.length === 0) return;
+  const { error } = await createAdminClient()
+    .from('bills')
+    .delete()
+    .in('agent_token_id', tokenIds)
+    .eq('approval_required', true)
+    .is('approved_at', null);
+  if (error) throw new Error('proposal cleanup failed');
+}
+
+/** True when the proposal's token row is revoked: such a proposal is not approvable and looks missing. A deleted token row (pruned after expiry) is not a revocation. */
+export async function proposalTokenRevoked(agentTokenId: string | null): Promise<boolean> {
+  if (!agentTokenId) return false;
+  const { data, error } = await createAdminClient().from('agent_tokens').select('revoked_at').eq('id', agentTokenId).maybeSingle();
+  if (error) throw new Error('token read failed');
+  return data?.revoked_at != null;
+}

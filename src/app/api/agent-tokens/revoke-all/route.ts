@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clearMintLock, guardAgentSession } from '@/lib/agent-access';
+import { deleteUnapprovedProposals } from '@/lib/agent-bills';
 
 /** Revokes every live token, then ends the account's sessions everywhere. */
 export async function POST(request: NextRequest) {
@@ -20,6 +21,8 @@ export async function POST(request: NextRequest) {
       console.error('agent-tokens revoke-all failed:', error.code);
       return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
+
+    await deleteUnapprovedProposals((data ?? []).map((row) => row.id));
 
     let signed_out = false;
     try {

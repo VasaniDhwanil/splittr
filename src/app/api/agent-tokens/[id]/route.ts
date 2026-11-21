@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { guardAgentSession, notFound } from '@/lib/agent-access';
+import { deleteUnapprovedProposals } from '@/lib/agent-bills';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,7 +25,10 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       console.error('agent-token revoke failed:', error.code);
       return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
-    if (data && data.length > 0) return NextResponse.json({ ok: true });
+    if (data && data.length > 0) {
+      await deleteUnapprovedProposals(data.map((row) => row.id));
+      return NextResponse.json({ ok: true });
+    }
 
     // Already revoked is still a success for its owner
     const { data: own } = await db.from('agent_tokens').select('id').eq('id', id).eq('user_id', guard.user.id).maybeSingle();

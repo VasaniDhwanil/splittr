@@ -17,6 +17,7 @@ import {
   touchAgentToken,
   type ResolveFailure,
 } from '@/lib/agent-access';
+import { deleteUnapprovedProposals } from '@/lib/agent-bills';
 import { buildAgentTokenStoppedEmail } from '@/lib/agent-emails';
 import { hashAgentToken, isAgentAccessEnabled, isWellFormedAgentToken } from '@/lib/agent-tokens';
 import { sendEmail } from '@/lib/email';
@@ -101,6 +102,7 @@ async function revokeLeakedTokens(request: Request, tokens: string[]): Promise<b
       .select('id, user_id, name');
     if (error || !data || data.length === 0) continue;
     revokedAny = true;
+    await deleteUnapprovedProposals(data.map((row) => row.id)).catch(() => {});
     for (const row of data) {
       try {
         const { data: owner } = await db.auth.admin.getUserById(row.user_id);

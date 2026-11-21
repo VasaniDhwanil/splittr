@@ -16,6 +16,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     if (!isBillId(id)) return notFound();
 
+    // The token check cannot sit inside the conditional update (PostgREST has no subquery filter);
+    // a revoke that lands between this read and the update is ordered after the approval.
+    const existing = await findProposal(guard.user.id, id);
+    if (!existing) return notFound();
+
     const now = new Date().toISOString();
     const { data, error } = await createAdminClient()
       .from('bills')

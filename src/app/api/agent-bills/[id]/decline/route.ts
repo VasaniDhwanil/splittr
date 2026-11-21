@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { auditAgentCall, guardAgentSession, noStore, notFound } from '@/lib/agent-access';
 import { APPROVAL_TOOL, DECLINE_OUTCOME, evaluateBreaker } from '@/lib/agent-breaker';
-import { isBillId } from '@/lib/agent-bills';
+import { findProposal, isBillId } from '@/lib/agent-bills';
 
 /**
  * Deletes the proposal, expired or not. The delete carries the same
@@ -15,6 +15,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if ('response' in guard) return guard.response;
     const { id } = await params;
     if (!isBillId(id)) return notFound();
+
+    // A proposal whose token was revoked looks missing (findProposal says so)
+    if (!(await findProposal(guard.user.id, id))) return notFound();
 
     const { data, error } = await createAdminClient()
       .from('bills')

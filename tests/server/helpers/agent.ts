@@ -1,5 +1,5 @@
 import { generateAgentToken, hmacEmailCode } from '@/lib/agent-tokens';
-import { db } from './db';
+import { createBill, db } from './db';
 import type { TestUser } from './session';
 
 export const TEST_PEPPER = 'test-pepper-0123456789-0123456789-abcdef';
@@ -91,3 +91,21 @@ export const activeTokens = async (user: TestUser) => {
   const { data } = await db().from('agent_tokens').select('id').eq('user_id', user.id).is('revoked_at', null);
   return data ?? [];
 };
+
+/** A bill an agent proposed through `tokenId`, as create_bill leaves it (or approved, when asked). */
+export async function insertProposal(user: TestUser, tokenId: string, opts: { approved?: boolean; name?: string } = {}) {
+  const bill = await createBill({
+    creator: user,
+    name: opts.name ?? 'Proposed dinner',
+    extra: {
+      created_via: 'agent',
+      agent_token_id: tokenId,
+      approval_required: true,
+      approved_at: opts.approved ? new Date().toISOString() : null,
+      approval_expires_at: new Date(Date.now() + 3600_000).toISOString(),
+    },
+  });
+  return bill.id;
+}
+
+export const billExists = async (id: string) => (await db().from('bills').select('id').eq('id', id).maybeSingle()).data !== null;

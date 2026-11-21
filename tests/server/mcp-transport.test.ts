@@ -19,7 +19,7 @@ vi.mock('@/lib/email', async (importOriginal) => {
 
 import { GET as billsMine } from '@/app/api/bills/mine/route';
 import { generateAgentToken } from '@/lib/agent-tokens';
-import { enableAgentAccess, insertToken, TEST_PEPPER } from './helpers/agent';
+import { billExists, enableAgentAccess, insertProposal, insertToken, TEST_PEPPER } from './helpers/agent';
 import { MCP_LIMITS } from '@/lib/mcp/endpoint';
 import { createUser, db, request, sql } from './helpers/db';
 import { callTool, initializeBody, mcpRequest, rpcBody, send } from './helpers/mcp';
@@ -208,6 +208,14 @@ describe('a token in the URL', () => {
     expect(JSON.stringify(mail.sent[0])).not.toContain(token);
 
     expect((await send(rpcBody('tools/list'), { token })).status).toBe(401);
+  });
+
+  it('deletes the revoked token unapproved proposals and keeps approved bills', async () => {
+    const pending = await insertProposal(user, tokenId);
+    const approved = await insertProposal(user, tokenId, { approved: true });
+    await send(rpcBody('tools/list'), { url: withToken(`access_token=${token}`) });
+    expect(await billExists(pending)).toBe(false);
+    expect(await billExists(approved)).toBe(true);
   });
 
   it('finds the token even when the URL is percent-encoded or sent with a valid header', async () => {

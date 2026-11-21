@@ -3,7 +3,7 @@ import { GET } from '@/app/api/agent-bills/[id]/route';
 import { POST as approve } from '@/app/api/agent-bills/[id]/approve/route';
 import { POST as decline } from '@/app/api/agent-bills/[id]/decline/route';
 import { GET as billGet } from '@/app/api/bills/[id]/route';
-import { enableAgentAccess, insertToken } from './helpers/agent';
+import { enableAgentAccess, insertProposal, insertToken } from './helpers/agent';
 import { createUser, db, params, request, uuid } from './helpers/db';
 import { callTool } from './helpers/mcp';
 import { signInAs, signOut, type TestUser } from './helpers/session';
@@ -284,5 +284,25 @@ describe('decline', () => {
       process.env.MCP_ENABLED = 'true';
     }
     expect(await row(id)).not.toBeNull();
+  });
+});
+
+describe('a proposal whose token was revoked', () => {
+  it('answers 404 on GET, approve and decline and stays unapproved', async () => {
+    const id = await propose();
+    await db().from('agent_tokens').update({ revoked_at: new Date().toISOString(), revoked_reason: 'user' }).eq('id', tokenId);
+    signInAs(owner);
+    expect((await get(id)).status).toBe(404);
+    expect((await doApprove(id)).status).toBe(404);
+    expect((await doDecline(id)).status).toBe(404);
+    const bill = (await row(id))!;
+    expect(bill.approved_at).toBeNull();
+    expect(await outcomes()).toEqual([]);
+  });
+
+  it('a live token proposal still approves', async () => {
+    const id = await propose();
+    signInAs(owner);
+    expect((await doApprove(id)).status).toBe(200);
   });
 });
