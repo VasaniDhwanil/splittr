@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { POST as billsPost } from '@/app/api/bills/route';
 import { enableAgentAccess, insertToken } from './helpers/agent';
-import { createBill, createUser, db, request, sql } from './helpers/db';
+import { createBill, createUser, db, request } from './helpers/db';
 import { callTool, rpcBody, send } from './helpers/mcp';
 import { signInAs, signOut, type TestUser } from './helpers/session';
 
@@ -401,8 +401,7 @@ describe('what a proposal is allowed to do', () => {
   it('an approved agent bill outlives the token\'s user, with agent_token_id cleared', async () => {
     const id = (await create({ name: 'Survivor' })).data.bill_id;
     await db().from('bills').update({ approved_at: new Date().toISOString() }).eq('id', id);
-    // Deleted with SQL: account deletion through the admin API is broken locally for users with bills
-    await sql('delete from auth.users where id = $1', [user.id]);
+    expect((await db().auth.admin.deleteUser(user.id)).error).toBeNull();
     const bill = (await db().from('bills').select('id, agent_token_id, created_via, approved_at').eq('id', id).single()).data!;
     expect(bill).toMatchObject({ id, agent_token_id: null, created_via: 'agent' });
     expect(bill.approved_at).not.toBeNull();

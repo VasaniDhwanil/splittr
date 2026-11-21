@@ -303,13 +303,29 @@ of `supabase db diff --linked`, which needs the database password.)
     `web-paths-before-017.test.ts` (ordinary web paths, no 017 column named)
     pass there, and the feature files fail there by design. Restore with
     `npm run db:reset`.
+53. **Account deletion through the auth admin API works** (migration 018).
+    Deleting an auth user cascades `SET NULL` into `bills` (`creator_user_id`,
+    `paid_by_user_id`; also `group_id` when a group is deleted), which fires
+    `ring_bill_doorbell()`. That function was SECURITY INVOKER, so it ran as
+    `supabase_auth_admin`, which has no USAGE on schema `realtime`, and the
+    deletion failed with "Database error deleting user" for every account that
+    had a bill (a bug since migration 013, not introduced by this feature).
+    018 makes the function SECURITY DEFINER (owner `postgres`, EXECUTE still
+    revoked from PUBLIC, anon, authenticated) rather than granting the auth
+    role anything on `realtime`. It was the only trigger on the cascade path
+    that needed it (`log_group_membership` is already SECURITY DEFINER).
+    `account-deletion.test.ts` deletes through `auth.admin.deleteUser` for a
+    bill creator, a payer, a group owner and an agent-token owner, and checks
+    the doorbell still writes to `realtime.messages`.
 
 ## Launch checklist
 
 Before turning the feature on in production (`MCP_ENABLED=true` plus the
 pepper):
 
-1. Apply migration 017 (and 015 and 016 before it, if not yet applied).
+1. Apply migration 017 (and 015 and 016 before it, if not yet applied), then
+   018 (`018_doorbell_definer.sql`, which fixes deleting accounts that have
+   bills; safe at any time, changes no data).
 2. Confirm the nightly prune job exists:
    `SELECT 1 FROM cron.job WHERE jobname = 'prune-agent-access'`. It must
    return a row. If it does not (pg_cron missing or the schedule failed), the

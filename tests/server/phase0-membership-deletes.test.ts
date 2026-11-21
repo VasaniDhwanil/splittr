@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DELETE as deleteGroup } from '@/app/api/groups/[id]/route';
-import { createGroup, createUser, params, request, sql } from './helpers/db';
+import { createGroup, createUser, db, params, request, sql } from './helpers/db';
 import { signInAs, signOut } from './helpers/session';
 
 // Migration 015 logs a "left" event whenever a group_members row is deleted.
@@ -37,7 +37,7 @@ describe('membership history when parents are deleted', () => {
     const elsewhere = await createGroup(member, [owner]); // the owner is also a member of another group
     expect(await events('user_id', owner.id)).toBe(2);
 
-    await sql('delete from auth.users where id = $1', [owner.id]);
+    expect((await db().auth.admin.deleteUser(owner.id)).error).toBeNull();
 
     expect((await sql('select 1 from groups where id = $1', [group.id])).length).toBe(0);
     expect(await events('group_id', group.id)).toBe(0);

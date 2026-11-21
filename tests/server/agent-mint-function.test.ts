@@ -241,9 +241,7 @@ describe('deleting the account', () => {
       })
       .select('id')
       .single();
-    // Plain SQL: deleting through GoTrue fails for any account that has a bill
-    // (the doorbell trigger can't run as supabase_auth_admin), which predates this feature.
-    await sql('DELETE FROM auth.users WHERE id = $1', [user.id]);
+    expect((await db().auth.admin.deleteUser(user.id)).error).toBeNull();
     const { data: gone } = await db().from('agent_tokens').select('id').eq('id', token.id);
     expect(gone).toHaveLength(0);
     const { data: after } = await db().from('bills').select('agent_token_id').eq('id', bill!.id).single();
