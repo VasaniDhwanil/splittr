@@ -41,6 +41,10 @@ export function findClient(clientId: unknown): OAuthClient | null {
   return CLIENTS.find((client) => client.clientId === clientId) ?? null;
 }
 
+/** How the destination is described to the person: derived from the pinned redirect host, never from a document's text. */
+export const destinationText = (client: Pick<OAuthClient, 'destination'>): string =>
+  client.destination === 'claude.ai' ? 'claude.ai' : 'an app on this computer, such as Claude Code';
+
 export const allClients = (): readonly OAuthClient[] => CLIENTS;
 
 // A registered loopback URI: http, host localhost or 127.0.0.1, no port, a path.

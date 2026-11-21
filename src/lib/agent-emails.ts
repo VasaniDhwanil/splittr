@@ -157,3 +157,96 @@ export function buildAgentTokenStoppedEmail(input: {
     text: [`${title}: "${input.tokenName}".`, '', input.reason, '', next, '', input.profileUrl].join('\n'),
   };
 }
+
+/** The phishing warning shown on the consent page, repeated in the inbox. */
+export const OAUTH_PHISHING_WARNING =
+  'Only continue if you pressed Connect in Claude on this device in the last few minutes. If someone sent you this link, stop: approving would give their Claude access to your Splittr.';
+
+export function buildOAuthConsentCodeEmail(input: {
+  /** What the person is connecting: "claude.ai" or "an app on this computer, such as Claude Code". */
+  destination: string;
+  accountEmail: string;
+  scopes: AgentScope[];
+  code: string;
+  ip: string;
+  minutes: number;
+}): Email {
+  const can = scopeList(input.scopes);
+  const body =
+    heading('Your code to connect Claude to Splittr') +
+    `
+        <tr>
+          <td style="padding:8px 40px 20px 40px;">
+            <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:32px;font-weight:700;letter-spacing:8px;color:#4ade80;">${escapeHtml(input.code)}</div>
+          </td>
+        </tr>` +
+    paragraph(
+      `Enter it on splittr.cash to connect <strong style="color:#ffffff;">${escapeHtml(input.destination)}</strong> to the Splittr account <strong style="color:#ffffff;">${escapeHtml(input.accountEmail)}</strong>. Claude asked to be able to:<br />${can
+        .map((line) => `&bull; ${escapeHtml(line)}`)
+        .join('<br />')}`
+    ) +
+    paragraph(`<strong style="color:#ffffff;">${escapeHtml(OAUTH_PHISHING_WARNING)}</strong>`) +
+    paragraph(
+      `<strong style="color:#ffffff;">Never share this code.</strong> Splittr will never ask for it by email, phone or chat.`
+    ) +
+    paragraph(
+      `Requested from around ${escapeHtml(input.ip)}. The code works for ${input.minutes} minutes. If this wasn&rsquo;t you, ignore this email: nothing is connected without the code.`,
+      true
+    ) +
+    spacer;
+
+  return {
+    subject: 'Your code to connect Claude to Splittr',
+    html: emailShell(body),
+    text: [
+      `Your code to connect Claude to Splittr: ${input.code}`,
+      '',
+      `Enter it on splittr.cash to connect ${input.destination} to the Splittr account ${input.accountEmail}. Claude asked to be able to:`,
+      ...can.map((line) => `- ${line}`),
+      '',
+      OAUTH_PHISHING_WARNING,
+      '',
+      'Never share this code. Splittr will never ask for it by email, phone or chat.',
+      '',
+      `Requested from around ${input.ip}. The code works for ${input.minutes} minutes. If this wasn't you, ignore this email: nothing is connected without the code.`,
+    ].join('\n'),
+  };
+}
+
+export function buildOAuthConnectedEmail(input: {
+  clientLabel: string;
+  destination: string;
+  accountEmail: string;
+  scopes: AgentScope[];
+  ip: string;
+  revokeUrl: string;
+}): Email {
+  const can = scopeList(input.scopes);
+  const body =
+    heading(`${escapeHtml(input.clientLabel)} was connected to your Splittr account`) +
+    paragraph(
+      `<strong style="color:#ffffff;">${escapeHtml(input.destination)}</strong> was connected to <strong style="color:#ffffff;">${escapeHtml(input.accountEmail)}</strong>, approved from around ${escapeHtml(input.ip)}. It can:<br />${can
+        .map((line) => `&bull; ${escapeHtml(line)}`)
+        .join('<br />')}`
+    ) +
+    paragraph('If you connected it, there is nothing to do.') +
+    button(input.revokeUrl, 'Not you? Disconnect everything') +
+    paragraph(
+      'That page asks you to confirm before anything is revoked. You can also manage connections under Agent access on your Splittr profile.',
+      true
+    ) +
+    spacer;
+
+  return {
+    subject: `${input.clientLabel} was connected to your Splittr account`,
+    html: emailShell(body),
+    text: [
+      `${input.destination} was connected to ${input.accountEmail} (${input.clientLabel}), approved from around ${input.ip}. It can:`,
+      ...can.map((line) => `- ${line}`),
+      '',
+      'If you connected it, there is nothing to do.',
+      '',
+      `Not you? Disconnect everything: ${input.revokeUrl}`,
+    ].join('\n'),
+  };
+}

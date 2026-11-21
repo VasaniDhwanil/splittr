@@ -8,11 +8,20 @@ export interface TestUser {
 
 let current: TestUser | null = null;
 let viaOAuth = false;
+/** The `amr` the signed-in session's verified claims carry. Default: not a fresh email sign-in. */
+let amr: { method: string; timestamp: number }[] = [{ method: 'password', timestamp: Math.floor(Date.now() / 1000) - 86_400 }];
+
+/** How the current test session was created, as getClaims() reports it. */
+export function setSessionAmr(entries: { method: string; ageSeconds: number }[]): void {
+  const now = Math.floor(Date.now() / 1000);
+  amr = entries.map((e) => ({ method: e.method, timestamp: now - e.ageSeconds }));
+}
 
 /** Who the cookie session resolves to for the handlers under test. */
 export function signInAs(user: TestUser | null): void {
   current = user;
   viaOAuth = false;
+  amr = [{ method: 'password', timestamp: Math.floor(Date.now() / 1000) - 86_400 }];
 }
 
 /**
@@ -55,6 +64,15 @@ export function fakeServerClient() {
       // an OAuth client's included.
       getUser: async () => ({ data: { user: current }, error: null }),
       getSession: async () => ({ data: { session: session() }, error: null }),
+      // Verified claims, like GoTrueClient.getClaims(): no jwt argument means "the session's"
+      getClaims: async () => {
+        const s = session();
+        if (!s || !current) return { data: null, error: { message: 'Auth session missing' } };
+        return {
+          data: { claims: { sub: current.id, amr, aal: 'aal1', ...(viaOAuth ? { client_id: 'x' } : {}) }, header: {}, signature: new Uint8Array() },
+          error: null,
+        };
+      },
       signOut: globalSignOut,
       verifyOtp: async () => ({
         data: { user: current, session: session() },
