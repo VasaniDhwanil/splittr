@@ -7,13 +7,31 @@ import type { TestUser } from './session';
 
 export const db = () => createAdminClient();
 
+/** A statement stuck behind another connection's lock fails fast instead of hanging a whole run. */
+export const SQL_LOCK_TIMEOUT_MS = 8_000;
+export const SQL_STATEMENT_TIMEOUT_MS = 15_000;
+
 /** Raw SQL against the local database, for what PostgREST can't express. */
 export async function sql<T = Record<string, unknown>>(text: string, params: unknown[] = []): Promise<T[]> {
-  const client = new Client({ connectionString: process.env.TEST_DATABASE_URL });
+  const client = new Client({
+    connectionString: process.env.TEST_DATABASE_URL,
+    connectionTimeoutMillis: 10_000,
+    lock_timeout: SQL_LOCK_TIMEOUT_MS,
+    statement_timeout: SQL_STATEMENT_TIMEOUT_MS,
+  });
   await client.connect();
   try {
     const result = await client.query(text, params);
     return result.rows as T[];
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === '55P03' || code === '57014') {
+      const kind = code === '55P03' ? 'lock timeout (another connection holds a lock)' : 'statement timeout';
+      throw new Error(`sql() ${kind} after ${code === '55P03' ? SQL_LOCK_TIMEOUT_MS : SQL_STATEMENT_TIMEOUT_MS} ms: ${text.slice(0, 120)}`, {
+        cause: error,
+      });
+    }
+    throw error;
   } finally {
     await client.end();
   }
