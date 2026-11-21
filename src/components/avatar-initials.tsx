@@ -56,12 +56,18 @@ export function getPersonHex(name: string): string {
   return PERSON_HEXES[nameHash(name) % PERSON_HEXES.length];
 }
 
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) {
-    return parts[0].charAt(0).toUpperCase();
-  }
-  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+// First letter of the first and last word. A trailing " (2)" counter (added
+// when two people share a name) and any non-letter characters are ignored.
+export function getInitials(name: string): string {
+  const letters = name
+    .replace(/\s*\(\d+\)\s*$/, '')
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.replace(/^[^\p{L}]+/u, '').charAt(0))
+    .filter(Boolean);
+  if (letters.length === 0) return '?';
+  if (letters.length === 1) return letters[0].toUpperCase();
+  return (letters[0] + letters[letters.length - 1]).toUpperCase();
 }
 
 const sizeClasses = {

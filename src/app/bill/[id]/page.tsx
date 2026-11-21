@@ -208,10 +208,16 @@ export default function BillPage() {
     setParticipants((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]));
 
   // Join without the name prompt; the server derives the name from the
-  // caller's group membership or profile. Returns null when not signed in.
+  // caller's group membership or profile. Returns null when not signed in, without calling the server.
   const autoJoin = async (): Promise<Participant | null> => {
     if (!bill) return null;
     try {
+      // Anonymous visitors have no identity to join under: skip the request
+      // (it would answer 400) and let the caller open the name dialog.
+      const {
+        data: { user },
+      } = await createClient().auth.getUser();
+      if (!user) return null;
       const res = await fetch('/api/participants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
