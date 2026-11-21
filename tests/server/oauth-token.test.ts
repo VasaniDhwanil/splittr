@@ -216,7 +216,7 @@ describe('authorization_code', () => {
     const user = await createUser('replaywrong');
     const { code, grantId } = await approved(user);
     await exchange(code);
-    for (const over of [{ code_verifier: 'x'.repeat(43) }, { client_id: HOSTED_CLIENT_ID }, { redirect_uri: 'http://localhost:1/callback' }]) {
+    for (const over of [{ code_verifier: 'x'.repeat(43) }, { client_id: HOSTED_CLIENT_ID }, { redirect_uri: 'http://localhost:1/callback' }] as Record<string, string>[]) {
       const res = await exchange(code, over);
       expect((await json(res)).error).toBe('invalid_grant');
     }
