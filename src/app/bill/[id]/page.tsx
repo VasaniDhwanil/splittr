@@ -202,6 +202,11 @@ export default function BillPage() {
     });
   }, [bill, participants, currentParticipant]);
 
+  // Put a just-joined row in the list at once. Otherwise the "you were removed"
+  // check below sees a list without you, until the refetch lands, and signs you out.
+  const addParticipantLocally = (p: Participant) =>
+    setParticipants((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]));
+
   // Join without the name prompt; the server derives the name from the
   // caller's group membership or profile. Returns null when not signed in.
   const autoJoin = async (): Promise<Participant | null> => {
@@ -214,6 +219,7 @@ export default function BillPage() {
       });
       if (!res.ok) return null;
       const participant: Participant & { participant_token?: string } = await res.json();
+      addParticipantLocally(participant);
       setCurrentParticipant(participant);
       localStorage.setItem(`splittr-participant-${bill.id}`, participant.id);
       rememberParticipantToken(participant);
@@ -283,6 +289,7 @@ export default function BillPage() {
       if (!response.ok) throw new Error('Failed to join');
 
       const participant = await response.json();
+      addParticipantLocally(participant);
       setCurrentParticipant(participant);
       localStorage.setItem(`splittr-participant-${bill.id}`, participant.id);
       rememberParticipantToken(participant);
