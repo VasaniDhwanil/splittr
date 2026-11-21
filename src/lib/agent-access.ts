@@ -47,6 +47,8 @@ export interface RateLimitHit {
   allowed: boolean;
   /** Seconds until the window resets. */
   retryAfter: number;
+  /** True when the answer is "no" only because the database could not be asked. */
+  unavailable?: boolean;
 }
 
 /** Counts one hit. If the database can't say, the answer is no. */
@@ -57,10 +59,10 @@ export async function hitRateLimit(key: string, limit: number, windowSeconds: nu
       p_limit: limit,
       p_window_seconds: windowSeconds,
     });
-    if (error || !data || typeof data.allowed !== 'boolean') return { allowed: false, retryAfter: windowSeconds };
+    if (error || !data || typeof data.allowed !== 'boolean') return { allowed: false, retryAfter: windowSeconds, unavailable: true };
     return { allowed: data.allowed, retryAfter: Number(data.retry_after) || windowSeconds };
   } catch {
-    return { allowed: false, retryAfter: windowSeconds };
+    return { allowed: false, retryAfter: windowSeconds, unavailable: true };
   }
 }
 
