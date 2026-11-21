@@ -499,6 +499,28 @@ describe('the revoke link in the email', () => {
     expect(await (await link(secret)).json()).toEqual({ revoked: 0 });
   });
 
+  it('works for 30 days after its token was created, then answers 404 like an unknown secret', async () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+    const oldSecret = secretFor('old-secret');
+    const old = await insertToken(user, { revokeLinkHash: hashAgentToken(oldSecret) });
+    const newer = await insertToken(user);
+    await db().from('agent_tokens').update({ created_at: daysAgo(31) }).eq('id', old.id);
+    signOut();
+
+    const expired = await link(oldSecret);
+    expect(expired.status).toBe(404);
+    expect(await expired.json()).toEqual(await (await link(secretFor('nobody'))).json());
+    const { data } = await db().from('agent_tokens').select('id, revoked_at').in('id', [old.id, newer.id]);
+    expect(data!.every((r) => r.revoked_at === null)).toBe(true);
+
+    // a 29-day-old link works, and takes the newer token with it
+    await db().from('agent_tokens').update({ created_at: daysAgo(29) }).eq('id', old.id);
+    const ok = await link(oldSecret);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ revoked: 2 });
+    expect(await (await link(oldSecret)).json()).toEqual({ revoked: 0 });
+  });
+
   it('answers 404 for an unknown or malformed secret', async () => {
     expect((await link(secretFor('nobody'))).status).toBe(404);
     for (const bad of ['short', '', null, 42, `${'A'.repeat(42)}!`, 'A'.repeat(44)]) {

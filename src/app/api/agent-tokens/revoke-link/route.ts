@@ -5,12 +5,17 @@ import { guardAgentOrigin, notFound } from '@/lib/agent-access';
 import { deleteUnapprovedProposals } from '@/lib/agent-bills';
 
 const SECRET = /^[A-Za-z0-9_-]{43}$/;
+const LINK_LIFETIME_MS = 30 * 86_400_000;
 
 /**
  * The "not you?" link in the notification email. It works without a session
  * on purpose: the person following it may be locked out of a compromised
- * account. The secret is 256 random bits; a match revokes all of its owner's
- * live tokens. POST only, so a mail scanner pre-fetching the link does nothing.
+ * account. The secret is 256 random bits. It works for 30 days after the
+ * token it was sent for was created, then answers 404 like an unknown secret.
+ * While valid it revokes ALL of the owner's unrevoked tokens, newer ones
+ * included (someone who suspects a break-in wants everything off), and deletes
+ * their unapproved proposals. POST only, so a mail scanner pre-fetching the
+ * link does nothing.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -24,11 +29,11 @@ export async function POST(request: NextRequest) {
     const db = createAdminClient();
     const { data: owner } = await db
       .from('agent_tokens')
-      .select('user_id')
+      .select('user_id, created_at')
       .eq('revoke_link_hash', hashAgentToken(secret))
       .limit(1)
       .maybeSingle();
-    if (!owner) return notFound();
+    if (!owner || Date.now() - Date.parse(owner.created_at) > LINK_LIFETIME_MS) return notFound();
 
     const { data, error } = await db
       .from('agent_tokens')
