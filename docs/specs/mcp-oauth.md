@@ -481,3 +481,192 @@ never affects `aud`; `getAuthorizationDetails` returns `redirect_uri`,
 every code exchange and rotates; dynamic registration is
 `POST {issuer}/oauth/clients/register`, advertised in RFC 8414 metadata only
 when enabled; access tokens also carry a `scope` claim.
+
+## 9. Spike results (WP8)
+
+Run 2026-11-20/21 with `scripts/oauth-probe.mjs` against the local stack
+(Supabase CLI 2.122.0, `[auth.oauth_server]` enabled, dynamic registration on,
+ES256 key from `supabase/signing_keys.json`, `refresh_token_reuse_interval = 10`).
+Everything below is the local GoTrue version. Production may be older or newer;
+the pre-launch smoke test in R-O11 still has to repeat the items marked
+"verify on production". Raw output is reproducible: `node scripts/oauth-probe.mjs`.
+
+### Contradictions with section 7, up front
+
+1. **R-O1 is necessary but not sufficient: OAuth access tokens can write to the
+   user's account at Supabase directly.** With an access token from the OAuth
+   flow (scope `email offline_access`), the local GoTrue answered:
+   `GET /auth/v1/user` 200; `PUT /auth/v1/user` 200 for `user_metadata` (the
+   write went through); **`PUT /auth/v1/user {password}` 200, and signing in
+   with that password then worked** (an account-takeover path that outlives
+   revocation of the grant); `PUT /auth/v1/user {email}` reached the
+   email-change code (500 only because the local stack has no mail server);
+   `POST /auth/v1/logout?scope=local` 204 (ends that OAuth session);
+   **`POST /auth/v1/logout` (default scope global) 204 and then the user's own
+   browser session answered 403**, so a Claude token can sign the user out
+   everywhere. `POST /factors` answered 422 `mfa_totp_enroll_not_enabled` only
+   because local MFA enrollment is off. Setting `secure_password_change = true`
+   locally did not change the password result (not confirmed that the setting
+   reached GoTrue, and a just-created session may pass its recency rule
+   anyway). The pre-launch smoke test line in R-O1 ("refuse OAuth tokens there
+   too") is therefore expected to FAIL; it must be run on production, and the
+   design needs a decision: accept (the token is the user's own delegated
+   credential, scope `email` only limits OIDC claims), or find a Supabase-side
+   control (custom access token hook cannot remove capabilities; Auth hooks
+   or disabling the password provider are the candidates), or report to
+   Supabase. Direct data access is NOT possible: PostgREST answered 403
+   `42501` (no privilege) for `profiles`, `bills`, `participants`,
+   `agent_tokens`, `groups` with the OAuth token, same as for any
+   authenticated session under migrations 006/012/014.
+2. **The RFC 8414 path-insertion URL does not exist locally.**
+   `/.well-known/oauth-authorization-server/auth/v1` is 404 (Kong has no route
+   for it; the same for `/.well-known/openid-configuration/auth/v1` and the
+   origin-root openid-configuration). The documents are served only under the
+   issuer: `/auth/v1/.well-known/oauth-authorization-server` and
+   `/auth/v1/.well-known/openid-configuration` (identical, 200). Claude
+   falls back to the latter (section 2 says so), so this works, but nothing
+   at the origin root helps. Verify on production (Supabase's hosted gateway
+   may route more).
+3. **Refresh failure is not `invalid_grant`, confirming D10.** After the
+   client's sessions are deleted (or `revokeGrant` is called) a refresh answers
+   HTTP 400 `{"code":400,"error_code":"refresh_token_not_found","msg":"Invalid
+   Refresh Token: Refresh Token Not Found"}` (GoTrue shape, not the RFC
+   `{"error":"invalid_grant"}` shape). Authorization-code failures DO use the
+   RFC shape (replayed code: 400 `{"error":"invalid_grant","error_description":
+   "Invalid authorization code"}`). A reused-too-old refresh token answers
+   400 `refresh_token_already_used`.
+4. **An already-issued access token stops working at Supabase the moment its
+   session is deleted** (`GET /user` -> 403 `session_not_found`), but section
+   7's R-O7 validates the JWT locally, which keeps accepting it until `exp`
+   (up to an hour). R-O7 relies on the grant row for revocation, which covers
+   this; but note the two disagree, and the grant row, not `getUser`, must stay
+   the authority.
+
+Everything else below agrees with section 7 and section 8's "answers
+established from the source".
+
+### Step answers
+
+**1. Discovery.** RFC 8414 under the issuer: `registration_endpoint`
+`<issuer>/oauth/clients/register`; `scopes_supported`
+`openid profile email phone offline_access`; `code_challenge_methods_supported`
+`S256 plain`; `token_endpoint_auth_methods_supported`
+`client_secret_basic client_secret_post none`; `grant_types_supported`
+`authorization_code refresh_token`;
+`client_id_metadata_document_supported` absent (no CIMD, so Claude uses DCR).
+The OpenID configuration is identical. See contradiction 2 for the paths.
+
+**2. DCR.** `POST <issuer>/oauth/clients/register`, JSON body, works **with and
+without an `apikey` header** (201 both ways; verify on production, where the
+hosted gateway may differ). Response: `client_id` (uuid), `client_type:
+"public"`, `redirect_uris`, `token_endpoint_auth_method: "none"`, `grant_types`,
+`response_types`, `client_name`, `registration_type: "dynamic"`, timestamps. No
+secret for a public client. Both the `https://claude.ai/api/mcp/auth_callback`
+and the loopback `http://localhost:53123/callback` registrations succeed. A
+plain-http non-loopback redirect is refused at registration (400
+`validation_failed`, "HTTP scheme only allowed for localhost"), which is a free
+extra layer under O2.
+
+**3. Authorize with `resource`.** `GET <issuer>/oauth/authorize?response_type=code
+&client_id&redirect_uri&code_challenge&code_challenge_method=S256&state
+&scope=email+offline_access&resource=https://www.splittr.cash/api/mcp` (no
+`apikey`, as in a browser) -> 302 to
+`http://localhost:3199/oauth/consent?authorization_id=<32 chars>`. The
+`resource` parameter is **accepted** and stored (`auth.oauth_authorizations.
+resource` holds it); omitting it also works; a non-absolute-URI resource
+(`not a url`) is refused by redirecting to the client's `redirect_uri` with
+`error=invalid_request&error_description=resource must be an absolute URI`.
+An unregistered `redirect_uri` is 400 `validation_failed "invalid
+redirect_uri"` (no redirect). Authorizations expire after 3 minutes
+(`expires_at` default `now() + 3 minutes`).
+
+**4. Details and approve.** `GET <issuer>/oauth/authorizations/{authorization_id}`
+with headers `apikey: <anon>` and `Authorization: Bearer <user access token>`.
+Fresh request response (200):
+`{"authorization_id","redirect_uri":"https://claude.ai/api/mcp/auth_callback",
+"client":{"id","name"},"user":{"id","email"},"scope":"email offline_access"}`.
+`redirect_uri` IS exposed reliably (it is not in supabase-js's TypeScript type;
+read it from the raw response). Without a user JWT: 401 `no_authorization`.
+Another user fetching the same authorization: 404 `oauth_authorization_not_found`
+(the request is bound to the first user who reads it, even before approval).
+Approve: `POST .../oauth/authorizations/{id}/consent` body `{"action":"approve"}`
+-> 200 `{"redirect_url":"<redirect_uri>?code=<uuid>&state=<state>"}`.
+
+**5. Token exchange.** `POST <issuer>/oauth/token`, form body, **no `apikey`
+header** -> 200 `{access_token, expires_in: 3600, refresh_token, token_type:
+"bearer"}` (a 12-character opaque refresh token; no `scope`, no `id_token`
+because `openid` was not requested). Access token header
+`{"alg":"ES256","kid":"<the local key's kid>","typ":"JWT"}`; payload keys
+`iss` (`<issuer>`), `sub`, `aud: "authenticated"`, `exp`, `iat`, `email`,
+`phone`, `app_metadata`, `user_metadata`, `role: "authenticated"`,
+`aal: "aal1"`, `amr: [{"method":"oauth_provider/authorization_code",
+"timestamp":...}]`, `session_id`, `is_anonymous`, `client_id`, `scope: "email
+offline_access"`. `resource` has no effect on `aud`. Replaying the code: 400
+`invalid_grant`. A refreshed access token keeps the same `client_id`, `scope` and the original
+`amr` timestamp.
+
+**6. Auto-approve.** Second authorization for the same client and user, then
+`getAuthorizationDetails` -> 200 with ONLY
+`{"redirect_url":"<redirect_uri>?code=...&state=..."}` (no `authorization_id`,
+`client`, `user`, `scope`), and that code exchanges for working tokens
+including a refresh token. The consent is stored in `auth.oauth_consents
+(id, user_id, client_id, scopes, granted_at, revoked_at)`, unique on
+`(user_id, client_id)`. After `delete from auth.oauth_consents where user_id=$1
+and client_id=$2` the next authorization returns the full details again. A
+request for MORE scopes than the stored consent (adds `profile`) also returns
+full details (consent is requested again); an equal request is auto-approved (a narrower one was not tested).
+
+**7. Refresh.** Refresh: `POST <issuer>/oauth/token` form
+`grant_type=refresh_token&refresh_token=...&client_id=...` -> 200 with a new
+access token and a NEW refresh token (rotation). Presenting the previous
+(parent) token again right away returns 200 with the same successor token, not
+a new one (the reuse interval; 10 s locally), and also while the child had not
+yet been used; after the child is used and the interval has passed, the
+two-generations-old token answers 400 `refresh_token_already_used` and the
+newest token KEEPS working (no family revocation observed). After deleting the
+client's rows in `auth.sessions` (`where user_id=$1 and oauth_client_id=$2`;
+column is `oauth_client_id`): refresh 400 `refresh_token_not_found` (contradiction
+3). Real revoke, `DELETE <issuer>/user/oauth/grants?client_id=<id>` with the
+user's own session (204): sets `revoked_at` on the consent row (soft), deletes
+all of that client's sessions for the user (0 left), refresh then answers 400
+`refresh_token_not_found`, the access token answers 403 `session_not_found` at
+`/user`, and the next authorization asks for consent again.
+`GET <issuer>/user/oauth/grants` lists live grants
+(`[{client:{id,name}, scopes, granted_at}]`). `DELETE .../grants` for a client
+with no consent row answers 404.
+
+**8. User endpoints with an OAuth token.** See contradiction 1. All of
+`GET /user`, `PUT /user`, `POST /logout` accept it, plus
+`GET /oauth/userinfo` (200 `{email, email_verified, sub}`). After a password
+change through the OAuth token the user's other sessions died (403) but the
+OAuth session lived on.
+
+**9. Deny.** `POST .../consent {"action":"deny"}` -> 200 `{"redirect_url":
+"<redirect_uri>?error=access_denied&error_description=User+denied+the+request
+&state=..."}` (same for claude.ai and loopback redirect). The authorization is
+then closed: approving it afterwards is 400 `validation_failed "authorization
+request is no longer pending"`. Another user approving someone's authorization:
+404.
+
+**10. Session freshness (R-O5 option 1).** `verifyOtp` with `type: 'magiclink'`
+and with `type: 'email'` (both fed the hashed token from
+`admin.generateLink({type:'magiclink'})`) give the identical
+`amr: [{"method":"otp","timestamp":<sign-in time>}]`, `aal1`. After
+`refreshSession()` 5 s later the new access token has a later `iat` but the
+**same** `amr` entry and timestamp (`auth.mfa_amr_claims` keeps its original
+`created_at`). So "the `otp` timestamp within the last 10 minutes" is a
+sound freshness check and survives refresh; the option stays. Caveats: it
+proves a magic-link (or emailed OTP) sign-in, not that the person is at the
+keyboard now; and `amr` entries are `otp`-only for magic-link sessions: a
+session created any other way (password, OAuth) has a different method, which
+the check must reject. An OAuth session's `amr` is
+`oauth_provider/authorization_code`, never `otp`, so an OAuth token can never
+satisfy this check.
+
+### Other facts worth keeping
+
+- The local access tokens for the stack's own `anon` and `service_role` keys are
+  ES256 JWTs once `signing_keys_path` is set (the CLI re-signs them); all 377
+  server tests passed unchanged.
+- `auth.oauth_clients` held 21 rows after the probe runs: registrations
+  accumulate (R-O10).
