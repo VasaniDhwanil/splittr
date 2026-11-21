@@ -8,9 +8,9 @@ describe('sql() helper', () => {
     await holder.connect();
     try {
       await holder.query('begin');
-      await holder.query('lock table public.agent_rate_limits in access exclusive mode');
+      await holder.query('lock table public.bills in access exclusive mode');
       const started = Date.now();
-      await expect(sql('select count(*) from public.agent_rate_limits')).rejects.toThrow(/lock timeout/);
+      await expect(sql('select count(*) from public.bills')).rejects.toThrow(/lock timeout/);
       expect(Date.now() - started).toBeLessThan(SQL_LOCK_TIMEOUT_MS + 4_000);
     } finally {
       await holder.query('rollback').catch(() => {});
