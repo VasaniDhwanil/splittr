@@ -12,10 +12,17 @@ const INVISIBLE = new RegExp(
     '\\u{E0000}-\\u{E007F}' + // tag characters
     '\\u202A-\\u202E\\u2066-\\u2069' + // bidi embeddings, overrides, isolates
     '\\u200B\\u200C\\u2060-\\u2064\\uFEFF' + // zero-width space/non-joiner, word joiner, invisible operators, BOM
+    '\\u200E\\u200F\\u061C' + // directional marks
+    '\\uFE00-\\uFE0E\\u{E0100}-\\u{E01EF}' + // variation selectors (FE0F is handled below)
+    '\\u00AD\\u034F\\u180E' + // soft hyphen, grapheme joiner, Mongolian vowel separator
+    '\\u115F\\u1160\\u3164\\uFFA0' + // Hangul fillers
     '\\u{E000}-\\u{F8FF}\\u{F0000}-\\u{FFFFD}\\u{100000}-\\u{10FFFD}' + // private use
     ']',
   'gu'
 );
+
+/** U+FE0F selects emoji form; it only means something after a character that has one (or before a keycap). */
+const STRAY_EMOJI_SELECTOR = /(?<!\p{Extended_Pictographic})\uFE0F(?!\u20E3)/gu;
 
 const CONTROL = /[\x00-\x1f\x7f]/g;
 
@@ -23,8 +30,10 @@ const CONTROL = /[\x00-\x1f\x7f]/g;
 export function cleanForAgent(raw: unknown, maxLength: number): string {
   const visible = String(raw ?? '')
     .replace(INVISIBLE, '')
+    .replace(STRAY_EMOJI_SELECTOR, '')
     .normalize('NFKC')
     .replace(INVISIBLE, '')
+    .replace(STRAY_EMOJI_SELECTOR, '')
     .replace(CONTROL, ' ')
     .replace(/\s+/g, ' ')
     .trim();
