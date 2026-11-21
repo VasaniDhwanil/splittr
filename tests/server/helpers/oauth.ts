@@ -1,181 +1,135 @@
-import { randomBytes } from 'node:crypto';
-import {
-  deriveSuccessors,
-  generateAuthorizationCode,
-  generateOAuthTokenPair,
-  hashOAuthSecret,
-} from '@/lib/oauth/tokens';
-import { CLAUDE_CODE_CLIENT_ID, HOSTED_CLIENT_ID } from '@/lib/oauth/clients';
-import { NextRequest } from 'next/server';
+import { createHash, randomBytes } from 'node:crypto';
+import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { db } from './db';
-import { enableAgentAccess, TEST_PEPPER } from './agent';
-import type { TestUser } from './session';
 
-export { CLAUDE_CODE_CLIENT_ID, HOSTED_CLIENT_ID, TEST_PEPPER };
+/** Talking to the local Supabase OAuth 2.1 server the way Claude does. */
 
-export const VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
-export const CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
-export const CODE_REDIRECT = 'http://localhost:54321/callback';
-export const RESOURCE = 'http://localhost:3199/api/mcp';
+const url = () => process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const anon = () => process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export const issuer = () => `${url()}/auth/v1`;
 
-export const newRequestId = () => randomBytes(16).toString('base64url');
-export const newBinding = () => randomBytes(32).toString('base64url');
-export const sha = hashOAuthSecret;
-
-export interface SeedRequest {
-  id: string;
-  binding: string;
+export interface RealSession {
+  access_token: string;
+  refresh_token: string;
 }
 
-/** An authorization request as GET /oauth/authorize leaves it. */
-export async function seedRequest(
-  user: TestUser | null,
-  opts: {
-    clientId?: string;
-    redirectUri?: string;
-    state?: string | null;
-    scopes?: string[];
-    status?: 'pending' | 'approved' | 'denied';
-    expiresAt?: Date;
-    codeHmac?: string | null;
-    codeExpiresAt?: Date | null;
-    attempts?: number;
-  } = {}
-): Promise<SeedRequest> {
-  const id = newRequestId();
-  const binding = newBinding();
-  const clientId = opts.clientId ?? CLAUDE_CODE_CLIENT_ID;
-  const { error } = await db()
-    .from('agent_oauth_requests')
-    .insert({
-      id,
+/** A real first-party session: magic link minted with the admin API, verified like the callback does. */
+export async function signInForReal(email: string): Promise<RealSession> {
+  const link = await db().auth.admin.generateLink({ type: 'magiclink', email });
+  if (link.error) throw link.error;
+  const client = createClient(url(), anon(), { auth: { persistSession: false, autoRefreshToken: false } });
+  const verified = await client.auth.verifyOtp({ type: 'email', token_hash: link.data.properties.hashed_token });
+  if (verified.error || !verified.data.session) throw new Error(`verifyOtp failed: ${verified.error?.message}`);
+  return verified.data.session;
+}
+
+export interface OAuthGrant {
+  clientId: string;
+  accessToken: string;
+  refreshToken: string;
+}
+
+/** Registers a client (DCR), authorizes it as `session`'s user, approves and exchanges the code. */
+export async function connectOAuthClient(
+  session: RealSession,
+  redirectUri = 'https://claude.ai/api/mcp/auth_callback'
+): Promise<OAuthGrant> {
+  const registered = await fetch(`${issuer()}/oauth/clients/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      client_name: 'Test Claude',
+      redirect_uris: [redirectUri],
+      token_endpoint_auth_method: 'none',
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+    }),
+  });
+  if (registered.status !== 201) throw new Error(`client registration failed: ${registered.status}`);
+  const { client_id: clientId } = (await registered.json()) as { client_id: string };
+
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  const authorize = new URL(`${issuer()}/oauth/authorize`);
+  for (const [k, v] of Object.entries({
+    response_type: 'code',
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    state: 'test-state',
+    scope: 'email offline_access',
+    resource: 'https://www.splittr.cash/api/mcp',
+  }))
+    authorize.searchParams.set(k, v);
+  const redirect = await fetch(authorize, { redirect: 'manual' });
+  const consentUrl = redirect.headers.get('location');
+  const authorizationId = consentUrl && new URL(consentUrl).searchParams.get('authorization_id');
+  if (!authorizationId) throw new Error(`authorize did not redirect to the consent page (${redirect.status})`);
+
+  const userHeaders = { apikey: anon(), authorization: `Bearer ${session.access_token}` };
+  const details = await fetch(`${issuer()}/oauth/authorizations/${authorizationId}`, { headers: userHeaders });
+  if (!details.ok) throw new Error(`authorization details failed: ${details.status}`);
+  const approve = await fetch(`${issuer()}/oauth/authorizations/${authorizationId}/consent`, {
+    method: 'POST',
+    headers: { ...userHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'approve' }),
+  });
+  const { redirect_url } = (await approve.json()) as { redirect_url?: string };
+  const code = redirect_url && new URL(redirect_url).searchParams.get('code');
+  if (!code) throw new Error(`approval returned no code (${approve.status})`);
+
+  const token = await fetch(`${issuer()}/oauth/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
       client_id: clientId,
-      redirect_uri: opts.redirectUri ?? (clientId === HOSTED_CLIENT_ID ? 'https://claude.ai/api/mcp/auth_callback' : CODE_REDIRECT),
-      state: opts.state === undefined ? 'st' : opts.state,
-      code_challenge: CHALLENGE,
-      scopes_requested: opts.scopes ?? ['read', 'bills:write'],
-      resource: RESOURCE,
-      binding_hash: sha(binding),
-      user_id: user?.id ?? null,
-      expires_at: (opts.expiresAt ?? new Date(Date.now() + 10 * 60_000)).toISOString(),
-      status: opts.status ?? 'pending',
-      code_hmac: opts.codeHmac ?? null,
-      code_expires_at: opts.codeExpiresAt?.toISOString() ?? null,
-      attempts: opts.attempts ?? 0,
-    });
-  if (error) throw new Error(`seedRequest failed: ${error.message}`);
-  return { id, binding };
-}
-
-export interface ApproveArgs {
-  scopes?: string[];
-  replace?: boolean;
-  requireCode?: boolean;
-  codeHmac?: string | null;
-  binding?: string;
-  user?: TestUser;
-  name?: string;
-  destination?: 'claude.ai' | 'loopback';
-}
-
-export async function callApprove(user: TestUser, req: SeedRequest, args: ApproveArgs = {}) {
-  const code = generateAuthorizationCode();
-  const { data, error } = await db().rpc('oauth_approve_request', {
-    p_request_id: req.id,
-    p_user_id: (args.user ?? user).id,
-    p_binding_hash: sha(args.binding ?? req.binding),
-    p_scopes: args.scopes ?? ['read'],
-    p_replace: args.replace ?? false,
-    p_require_code: args.requireCode ?? false,
-    p_code_hmac: args.codeHmac ?? null,
-    p_code_hash: sha(code),
-    p_grant_name: args.name ?? 'Claude Code',
-    p_destination: args.destination ?? 'loopback',
-    p_revoke_link_hash: sha(randomBytes(32).toString('base64url')),
+      code_verifier: verifier,
+      resource: 'https://www.splittr.cash/api/mcp',
+    }),
   });
-  if (error) throw new Error(`oauth_approve_request failed: ${error.message}`);
-  return { result: data as { status: string; grant_id?: string; attempts_left?: number; replaces?: number }, code };
+  const body = (await token.json()) as { access_token?: string; refresh_token?: string };
+  if (!body.access_token || !body.refresh_token) throw new Error(`token exchange failed: ${token.status}`);
+  return { clientId, accessToken: body.access_token, refreshToken: body.refresh_token };
 }
 
-export async function callRedeem(code: string, bindingsOk = true) {
-  const pair = generateOAuthTokenPair(TEST_PEPPER);
-  const { data, error } = await db().rpc('oauth_redeem_code', {
-    p_code_hash: sha(code),
-    p_bindings_ok: bindingsOk,
-    p_access_hash: sha(pair.access),
-    p_refresh_hash: sha(pair.refresh),
-  });
-  if (error) throw new Error(`oauth_redeem_code failed: ${error.message}`);
-  return { result: data as { status: string; grant_id?: string; user_id?: string; replaced?: number }, pair };
+export interface CookieJar {
+  cookies: Map<string, string>;
+  /** Same shape as Next's cookies(): what the route handlers read. */
+  store: { getAll(): { name: string; value: string }[]; set(name: string, value: string, options?: unknown): void };
 }
 
-export async function callRefresh(refresh: string, clientId = CLAUDE_CODE_CLIENT_ID) {
-  const next = deriveSuccessors(refresh, TEST_PEPPER);
-  const { data, error } = await db().rpc('oauth_refresh', {
-    p_refresh_hash: sha(refresh),
-    p_client_id: clientId,
-    p_new_access_hash: sha(next.access),
-    p_new_refresh_hash: sha(next.refresh),
-  });
-  if (error) throw new Error(`oauth_refresh failed: ${error.message}`);
-  return { result: data as { status: string; replay?: boolean; grant_id?: string; user_id?: string }, next };
-}
-
-/** Request, approve and redeem: a live grant with its first token pair. */
-export async function connect(
-  user: TestUser,
-  opts: { clientId?: string; scopes?: string[]; replace?: boolean } = {}
-) {
-  const clientId = opts.clientId ?? CLAUDE_CODE_CLIENT_ID;
-  const req = await seedRequest(user, { clientId });
-  const { result: approved, code } = await callApprove(user, req, {
-    scopes: opts.scopes,
-    replace: opts.replace,
-    destination: clientId === HOSTED_CLIENT_ID ? 'claude.ai' : 'loopback',
-    requireCode: false,
-  });
-  if (approved.status !== 'ok') throw new Error(`connect: approve gave ${approved.status}`);
-  const { result, pair } = await callRedeem(code);
-  if (result.status !== 'ok') throw new Error(`connect: redeem gave ${result.status}`);
-  return { grantId: approved.grant_id!, pair, code, requestId: req.id };
-}
-
-export const grantRow = async (id: string) => (await db().from('agent_tokens').select('*').eq('id', id).single()).data!;
-export const oauthTokens = async (grantId: string) =>
-  (await db().from('agent_oauth_tokens').select('*').eq('grant_id', grantId)).data ?? [];
-export const oauthCodes = async (grantId: string) =>
-  (await db().from('agent_oauth_codes').select('*').eq('grant_id', grantId)).data ?? [];
-
-/** Agent access plus OAuth on, issuer http://localhost:3199 (so the cookie is the http variant). */
-export function enableOAuth(issuer = 'http://localhost:3199'): () => void {
-  const restoreAgent = enableAgentAccess();
-  const before = { switch: process.env.MCP_OAUTH_ENABLED, issuer: process.env.OAUTH_ISSUER, vercel: process.env.VERCEL_ENV };
-  process.env.MCP_OAUTH_ENABLED = 'true';
-  process.env.OAUTH_ISSUER = issuer;
-  return () => {
-    restoreAgent();
-    for (const [key, value] of [
-      ['MCP_OAUTH_ENABLED', before.switch],
-      ['OAUTH_ISSUER', before.issuer],
-      ['VERCEL_ENV', before.vercel],
-    ] as const) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+export function emptyJar(): CookieJar {
+  const cookies = new Map<string, string>();
+  return {
+    cookies,
+    store: {
+      getAll: () => [...cookies].map(([name, value]) => ({ name, value })),
+      set: (name, value) => {
+        if (value === '') cookies.delete(name);
+        else cookies.set(name, value);
+      },
+    },
   };
 }
 
-export const randomIp = () => `10.${randomBytes(1)[0]}.${randomBytes(1)[0]}.${randomBytes(1)[0]}`;
-
-/** An application/x-www-form-urlencoded POST, as Claude sends to the token endpoint. */
-export function formRequest(
-  path: string,
-  fields: Record<string, string> | string,
-  headers: Record<string, string> = {}
-): NextRequest {
-  return new NextRequest(`http://localhost:3199${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-real-ip': randomIp(), ...headers },
-    body: typeof fields === 'string' ? fields : new URLSearchParams(fields).toString(),
+/** The session cookies a browser would hold for these tokens, written by @supabase/ssr itself. */
+export async function cookiesFor(tokens: RealSession): Promise<CookieJar> {
+  const jar = emptyJar();
+  const writer = createServerClient(url(), anon(), {
+    cookies: {
+      getAll: () => jar.store.getAll(),
+      setAll: (list) => list.forEach(({ name, value, options }) => jar.store.set(name, value, options)),
+    },
   });
+  const { error } = await writer.auth.setSession(tokens);
+  if (error) throw error;
+  return jar;
 }
+
+export const cookieHeader = (jar: CookieJar) =>
+  jar.store.getAll().map(({ name, value }) => `${name}=${value}`).join('; ');

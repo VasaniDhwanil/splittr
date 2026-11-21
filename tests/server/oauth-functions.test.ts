@@ -17,7 +17,7 @@ import {
   oauthTokens,
   seedRequest,
   sha,
-} from './helpers/oauth';
+} from './helpers/oauth-server';
 
 // The SQL functions behind the OAuth server, called directly with no route in
 // between. These are the security-critical parts: single-use codes, token

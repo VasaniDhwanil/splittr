@@ -9,7 +9,7 @@ import { POST as requestCode } from '@/app/api/agent-tokens/route';
 import { findProposal } from '@/lib/agent-bills';
 import { enableAgentAccess, insertProposal, insertToken } from './helpers/agent';
 import { createUser, request } from './helpers/db';
-import { connect, HOSTED_CLIENT_ID, callApprove, callRedeem, seedRequest } from './helpers/oauth';
+import { connect, HOSTED_CLIENT_ID, callApprove, callRedeem, seedRequest } from './helpers/oauth-server';
 import { db } from './helpers/db';
 import { signInAs, signOut } from './helpers/session';
 

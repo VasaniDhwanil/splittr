@@ -10,7 +10,7 @@ import {
   enableOAuth,
   randomIp,
   sha,
-} from './helpers/oauth';
+} from './helpers/oauth-server';
 
 let restore: () => void;
 beforeAll(() => {
