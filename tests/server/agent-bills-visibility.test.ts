@@ -9,7 +9,8 @@ import { generateMetadata } from '@/app/bill/[id]/layout';
 import OpengraphImage from '@/app/bill/[id]/opengraph-image';
 import TwitterImage from '@/app/bill/[id]/twitter-image';
 import { createBill, createUser, db, joinBill, params, request, uuid, type TestBill } from './helpers/db';
-import { signInAs, signOut, type TestUser } from './helpers/session';
+import { canEditClaims } from '@/lib/auth-helpers';
+import { fakeServerClient, signInAs, signOut, type TestUser } from './helpers/session';
 
 // G2: a bill that is waiting for approval does not exist for anyone, its own
 // creator and the holder of its creator token included, on every ordinary path.
@@ -208,6 +209,28 @@ describe('claims', () => {
   });
 });
 
+describe('canEditClaims', () => {
+  const can = (billId: string, headers: Record<string, string> = {}) =>
+    canEditClaims(request('POST', '/api/claims', { headers }), billId, fakeServerClient() as never);
+
+  it('is false on a proposed bill for every kind of caller, independent of the route', async () => {
+    expect(await can(unpublished.id)).toBe(false);
+    expect(await can(unpublished.id, asCreator())).toBe(false);
+    expect(await can(unpublished.id, { 'X-Participant-Token': guest.token! })).toBe(false);
+    signInAs(owner); // the creator, and a participant row on it
+    expect(await can(unpublished.id)).toBe(false);
+  });
+
+  it('is true for the same callers once the bill is published', async () => {
+    const { id, creatorToken } = await createBill({ creator: owner });
+    const joined = await joinBill(id, { name: 'Friend' });
+    expect(await can(id, asCreator(creatorToken))).toBe(true);
+    expect(await can(id, { 'X-Participant-Token': joined.token! })).toBe(true);
+    signInAs(owner);
+    expect(await can(id)).toBe(true);
+  });
+});
+
 describe('POST /api/bills/claim', () => {
   it('cannot adopt an unpublished bill with its creator token', async () => {
     const orphan = await createBill({ creator: null, extra: PENDING });
@@ -239,7 +262,9 @@ describe('GET /api/bills/mine', () => {
     const byId = new Map(rows.map((r) => [r.id, r]));
     expect(byId.has(expired.id)).toBe(false);
     expect(byId.get(live.id)).toMatchObject({ approval: 'none', created_via: 'web', approval_expires_at: null });
-    expect(byId.get(pending.id)).toMatchObject({ approval: 'pending', created_via: 'agent', approval_expires_at: PENDING.approval_expires_at.replace('Z', '+00:00') });
+    expect(byId.get(pending.id)).toMatchObject({ approval: 'pending', created_via: 'agent' });
+    // compared as instants: Postgres drops trailing zeros from the fraction, so the strings can differ
+    expect(Date.parse(byId.get(pending.id)!.approval_expires_at!)).toBe(Date.parse(PENDING.approval_expires_at));
     expect(byId.get(approved.id)).toMatchObject({ approval: 'none', created_via: 'agent' });
     expect(Object.keys(byId.get(live.id)!).sort()).toEqual(
       ['approval', 'approval_expires_at', 'created_at', 'created_via', 'id', 'name', 'short_code', 'status', 'subtotal', 'tax', 'tip_amount'].sort()
