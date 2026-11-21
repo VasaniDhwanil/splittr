@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { isOAuthAccessToken } from '@/lib/supabase/oauth-guard'
 
 // Keeps the Supabase session cookie fresh on every page and API request.
 export async function proxy(request: NextRequest) {
@@ -23,6 +24,20 @@ export async function proxy(request: NextRequest) {
       },
     }
   )
+
+  // OAuth access tokens never authenticate the web app (R-O1): a session
+  // cookie holding one is dropped, for this request and in the browser.
+  const { data } = await supabase.auth.getSession()
+  if (isOAuthAccessToken(data.session?.access_token)) {
+    const names = request.cookies
+      .getAll()
+      .map(({ name }) => name)
+      .filter((name) => /^sb-.+-auth-token(\.\d+)?$/.test(name) || /^sb-.+-auth-token-code-verifier$/.test(name))
+    names.forEach((name) => request.cookies.delete(name))
+    const cleared = NextResponse.next({ request })
+    names.forEach((name) => cleared.cookies.set(name, '', { maxAge: 0, path: '/' }))
+    return cleared
+  }
 
   await supabase.auth.getUser()
   return supabaseResponse

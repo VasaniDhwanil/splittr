@@ -17,7 +17,6 @@ import { createClient } from '@supabase/supabase-js';
 
 const LOCAL_URL = 'http://127.0.0.1:54321';
 const ISSUER = `${LOCAL_URL}/auth/v1`;
-const APP = 'http://localhost:3199';
 const CLAUDE_REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
 const LOOPBACK_REDIRECT = 'http://localhost:53123/callback';
 const RESOURCE = 'https://www.splittr.cash/api/mcp';
@@ -339,7 +338,7 @@ async function main() {
     }
     const consents = await sql('select user_id, client_id, scopes, granted_at, revoked_at from auth.oauth_consents where user_id = $1', [user.id]);
     show('    auth.oauth_consents rows', consents);
-    const del = await clearConsents(user.id, state.web.client_id);
+    await clearConsents(user.id, state.web.client_id);
     console.log(`  deleted stored consent for (user, client)`);
     const a3 = await startAuthorization(state.web);
     const d3 = await getDetails(user.session.access_token, a3.authorizationId);

@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { ensureProfile } from '@/lib/auth-profile'
 import { clearMintLock } from '@/lib/agent-access'
 import { ALLOWED_ORIGINS } from '@/lib/site-origin'
+import { isOAuthAccessToken } from '@/lib/supabase/oauth-guard'
 
 /** Only ever redirect to a same-site path — never to an arbitrary URL. */
 function safePath(raw: string | null | undefined): string {
@@ -64,10 +65,19 @@ export async function GET(request: Request) {
 
   const supabase = await createClient()
 
+  /** OAuth access tokens never authenticate the web app (R-O1): drop such a session. */
+  const refuseOAuthSession = async (accessToken: string | undefined) => {
+    if (!isOAuthAccessToken(accessToken)) return null
+    await supabase.auth.signOut()
+    return NextResponse.redirect(`${origin}/signin?error=auth_failed`)
+  }
+
   if (tokenHash) {
     const type = (searchParams.get('type') as EmailOtpType) || 'email'
     const { data, error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash })
     if (!error) {
+      const refused = await refuseOAuthSession(data.session?.access_token)
+      if (refused) return refused
       if (data.user) {
         await ensureProfile(data.user)
         // A verified magic link is a fresh sign-in: lift any agent-token lock
@@ -83,6 +93,8 @@ export async function GET(request: Request) {
   if (code) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
+      const refused = await refuseOAuthSession(data.session?.access_token)
+      if (refused) return refused
       if (data.user) {
         await ensureProfile(data.user)
         await clearMintLock(data.user.id)

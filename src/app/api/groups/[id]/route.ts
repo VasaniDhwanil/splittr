@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { memberBill, PARTICIPANT_COLUMNS } from '@/lib/auth-helpers';
 import { cleanText, LIMITS } from '@/lib/validate';
 
