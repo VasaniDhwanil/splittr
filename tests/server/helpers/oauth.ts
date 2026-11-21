@@ -6,8 +6,9 @@ import {
   hashOAuthSecret,
 } from '@/lib/oauth/tokens';
 import { CLAUDE_CODE_CLIENT_ID, HOSTED_CLIENT_ID } from '@/lib/oauth/clients';
+import { NextRequest } from 'next/server';
 import { db } from './db';
-import { TEST_PEPPER } from './agent';
+import { enableAgentAccess, TEST_PEPPER } from './agent';
 import type { TestUser } from './session';
 
 export { CLAUDE_CODE_CLIENT_ID, HOSTED_CLIENT_ID, TEST_PEPPER };
@@ -144,3 +145,37 @@ export const oauthTokens = async (grantId: string) =>
   (await db().from('agent_oauth_tokens').select('*').eq('grant_id', grantId)).data ?? [];
 export const oauthCodes = async (grantId: string) =>
   (await db().from('agent_oauth_codes').select('*').eq('grant_id', grantId)).data ?? [];
+
+/** Agent access plus OAuth on, issuer http://localhost:3199 (so the cookie is the http variant). */
+export function enableOAuth(issuer = 'http://localhost:3199'): () => void {
+  const restoreAgent = enableAgentAccess();
+  const before = { switch: process.env.MCP_OAUTH_ENABLED, issuer: process.env.OAUTH_ISSUER, vercel: process.env.VERCEL_ENV };
+  process.env.MCP_OAUTH_ENABLED = 'true';
+  process.env.OAUTH_ISSUER = issuer;
+  return () => {
+    restoreAgent();
+    for (const [key, value] of [
+      ['MCP_OAUTH_ENABLED', before.switch],
+      ['OAUTH_ISSUER', before.issuer],
+      ['VERCEL_ENV', before.vercel],
+    ] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
+
+export const randomIp = () => `10.${randomBytes(1)[0]}.${randomBytes(1)[0]}.${randomBytes(1)[0]}`;
+
+/** An application/x-www-form-urlencoded POST, as Claude sends to the token endpoint. */
+export function formRequest(
+  path: string,
+  fields: Record<string, string> | string,
+  headers: Record<string, string> = {}
+): NextRequest {
+  return new NextRequest(`http://localhost:3199${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-real-ip': randomIp(), ...headers },
+    body: typeof fields === 'string' ? fields : new URLSearchParams(fields).toString(),
+  });
+}
