@@ -147,7 +147,7 @@ export function TokenReveal({ token, mcpUrl, onDone }: { token: MintedToken; mcp
           </div>
           <pre
             data-testid="agent-setup-snippet"
-            className="surface overflow-x-auto rounded-xl p-3 font-mono text-xs leading-relaxed text-white/80"
+            className="surface whitespace-pre-wrap break-all rounded-xl p-3 font-mono text-xs leading-relaxed text-white/80"
           >
             {snippet.code}
           </pre>

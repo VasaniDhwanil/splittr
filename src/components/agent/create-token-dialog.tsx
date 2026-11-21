@@ -63,7 +63,6 @@ function CreateTokenBody({ onOpenChange, mcpUrl, onCreated }: CreateTokenDialogP
   const [expiry, setExpiry] = useState<ExpiryDays>(DEFAULT_EXPIRY);
   const [codeExpiresAt, setCodeExpiresAt] = useState<string | null>(null);
   const [code, setCode] = useState('');
-  const [attemptsLeft, setAttemptsLeft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,7 +87,6 @@ function CreateTokenBody({ onOpenChange, mcpUrl, onCreated }: CreateTokenDialogP
       }
       setCodeExpiresAt(data.code_expires_at ?? null);
       setCode('');
-      setAttemptsLeft(null);
       if (resend) setNotice('A new code is on its way. The old one no longer works.');
       setStep('code');
     } catch {
@@ -121,7 +119,6 @@ function CreateTokenBody({ onOpenChange, mcpUrl, onCreated }: CreateTokenDialogP
     try {
       const { res, data } = await postJson('/api/agent-tokens/verify', { code });
       if (!res.ok) {
-        if (data.code === 'wrong_code' && typeof data.attempts_left === 'number') setAttemptsLeft(data.attempts_left);
         if (data.code === 'wrong_code') setCode('');
         setError(tokenErrorMessage(data.code, data));
         return;
@@ -141,7 +138,7 @@ function CreateTokenBody({ onOpenChange, mcpUrl, onCreated }: CreateTokenDialogP
 
   return (
     <DialogContent
-      className={`${DIALOG_SURFACE} max-h-[92dvh] overflow-y-auto`}
+      className={`${DIALOG_SURFACE} max-h-[92dvh] overflow-y-auto [&>*]:min-w-0`}
       showCloseButton={!locked}
       onInteractOutside={(e) => locked && e.preventDefault()}
       onEscapeKeyDown={(e) => locked && e.preventDefault()}
@@ -234,11 +231,7 @@ function CreateTokenBody({ onOpenChange, mcpUrl, onCreated }: CreateTokenDialogP
             <Field
               htmlFor="agent-token-code"
               label="Code"
-              helper={
-                attemptsLeft !== null && attemptsLeft > 0
-                  ? `${attemptsLeft} ${attemptsLeft === 1 ? 'try' : 'tries'} left on this code.`
-                  : 'Never share this code. Splittr will never ask you for it.'
-              }
+              helper="Never share this code. Splittr will never ask you for it."
             >
               <Input
                 id="agent-token-code"

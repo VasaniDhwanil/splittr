@@ -84,7 +84,7 @@ function TokenItem({
         <dt className="text-white/35">Last used</dt>
         <dd className="break-words text-white/60">
           {token.last_used_at
-            ? `${formatRelativeDate(token.last_used_at)}${token.last_used_ip ? `, from ${token.last_used_ip}` : ''}`
+            ? `${formatRelativeDate(token.last_used_at)}${token.last_used_ip && token.last_used_ip !== 'unknown' ? `, from ${token.last_used_ip}` : ''}`
             : 'Never used'}
         </dd>
       </dl>
@@ -100,7 +100,7 @@ function TokenItem({
             type="button"
             variant="ghost"
             size="sm"
-            className="text-white/60 hover:bg-white/[0.06] hover:text-white"
+            className={`text-white/60 hover:bg-white/[0.06] hover:text-white ${token.status === 'active' ? '-ml-3.5' : ''}`}
             onClick={onRevoke}
             aria-label={`Revoke ${token.name}`}
           >
@@ -227,7 +227,7 @@ export function AgentAccess({ index = 4 }: { index?: number }) {
             <div className="space-y-2">
               <p className="text-sm font-medium text-white/70">Address your agent connects to</p>
               <div className="surface flex items-center gap-3 rounded-2xl py-2 pr-2 pl-4">
-                <code className="min-w-0 flex-1 truncate font-mono text-sm text-white/80" title={data.mcpUrl}>
+                <code className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-white/80">
                   {data.mcpUrl}
                 </code>
                 <CopyButton value={data.mcpUrl} label="Copy" ariaLabel="Copy address" />
