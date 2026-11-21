@@ -247,6 +247,12 @@ ALTER TABLE public.bills ADD COLUMN IF NOT EXISTS approval_required BOOLEAN NOT 
 ALTER TABLE public.bills ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE public.bills ADD COLUMN IF NOT EXISTS approval_expires_at TIMESTAMP WITH TIME ZONE;
 
+-- A bill awaiting approval is never filed into a group: filing is what shows a
+-- bill to other people, and nobody but its owner may see an unapproved one.
+ALTER TABLE public.bills DROP CONSTRAINT IF EXISTS bills_proposal_has_no_group;
+ALTER TABLE public.bills ADD CONSTRAINT bills_proposal_has_no_group
+  CHECK (NOT (approval_required AND approved_at IS NULL AND group_id IS NOT NULL));
+
 CREATE INDEX IF NOT EXISTS idx_bills_agent_token_id ON public.bills(agent_token_id);
 CREATE INDEX IF NOT EXISTS idx_bills_awaiting_approval ON public.bills(approval_expires_at)
   WHERE approval_required AND approved_at IS NULL;

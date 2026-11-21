@@ -4,7 +4,7 @@ import { POST as approve } from '@/app/api/agent-bills/[id]/approve/route';
 import { POST as decline } from '@/app/api/agent-bills/[id]/decline/route';
 import { GET as billGet } from '@/app/api/bills/[id]/route';
 import { enableAgentAccess, insertProposal, insertToken } from './helpers/agent';
-import { createUser, db, params, request, uuid } from './helpers/db';
+import { createGroup, createUser, db, params, request, uuid } from './helpers/db';
 import { callTool } from './helpers/mcp';
 import { signInAs, signOut, type TestUser } from './helpers/session';
 
@@ -304,5 +304,27 @@ describe('a proposal whose token was revoked', () => {
     const id = await propose();
     signInAs(owner);
     expect((await doApprove(id)).status).toBe(200);
+  });
+});
+
+describe('the database refuses a proposal that is in a group', () => {
+  it('on insert, and when a pending proposal is moved into a group', async () => {
+    const group = await createGroup(owner);
+    const pending = { approval_required: true, approved_at: null, approval_expires_at: new Date(Date.now() + 3600_000).toISOString() };
+    const insert = await db()
+      .from('bills')
+      .insert({ name: 'x', subtotal: 1, tax: 0, tip_percent: 0, tip_amount: 0, short_code: uuid().slice(0, 6).toUpperCase(), status: 'active', creator_user_id: owner.id, group_id: group.id, ...pending });
+    expect(insert.error?.code).toBe('23514');
+    expect(insert.error?.message).toMatch(/bills_proposal_has_no_group/);
+
+    const id = await propose();
+    const update = await db().from('bills').update({ group_id: group.id }).eq('id', id);
+    expect(update.error?.code).toBe('23514');
+    expect((await row(id))!.group_id).toBeNull();
+
+    // approved bills and ordinary bills can be filed as before
+    signInAs(owner);
+    expect((await doApprove(id)).status).toBe(200);
+    expect((await db().from('bills').update({ group_id: group.id }).eq('id', id)).error).toBeNull();
   });
 });
