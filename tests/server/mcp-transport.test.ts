@@ -250,6 +250,56 @@ describe('a token in the URL', () => {
   });
 });
 
+describe('well-formed tokens in the URL are throttled before the database', () => {
+  const lookups = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.filter((call) => call[0] === 'agent_tokens').length;
+
+  it('40 requests with different random tokens cost at most the failed-auth limit in lookups, all answered 401', async () => {
+    const ip = `198.51.100.${randomBytes(1)[0]}`;
+    const spy = vi.spyOn(db(), 'from');
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 40; i++) {
+        const res = await send(rpcBody('tools/list'), { ip, url: `http://localhost:3000/api/mcp?k=${generateAgentToken().token}` });
+        statuses.push(res.status);
+      }
+      expect(statuses.every((s) => s === 401)).toBe(true);
+      expect(lookups(spy)).toBeLessThanOrEqual(30);
+      expect(lookups(spy)).toBeGreaterThan(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('a live token is still revoked on the first sighting from a fresh address', async () => {
+    const res = await send(rpcBody('tools/list'), { url: `http://localhost:3000/api/mcp?k=${token}` });
+    expect(res.status).toBe(401);
+    expect((await db().from('agent_tokens').select('revoked_reason').eq('id', tokenId).single()).data!.revoked_reason).toBe('query_string');
+  });
+});
+
+describe('a database failure', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('is a 503 that says the token is fine, not a 401 about the token', async () => {
+    const failing = vi.spyOn(db(), 'from').mockImplementationOnce(
+      () =>
+        ({
+          select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: '57P01', message: 'terminating' } }) }) }),
+        }) as never
+    );
+    const res = await send(rpcBody('tools/list'), { token });
+    failing.mockRestore();
+    expect(res.status).toBe(503);
+    const text = await res.text();
+    expect(JSON.parse(text).error.message).toMatch(/temporarily unavailable/i);
+    expect(JSON.parse(text).error.message).toMatch(/token is fine/i);
+    expect(text).not.toMatch(/not recognised/);
+    expect(text).not.toContain(token);
+    // and the token was not touched
+    expect((await send(rpcBody('tools/list'), { token })).status).toBe(200);
+  });
+});
+
 describe('Origin and method', () => {
   it('refuses a foreign browser Origin, allows none and the site itself', async () => {
     expect((await send(rpcBody('tools/list'), { token, headers: { origin: 'https://evil.example' } })).status).toBe(403);
@@ -458,6 +508,7 @@ describe('rate limits', () => {
   it('garbage tokens cause no database writes', async () => {
     const before = await sql<{ n: string }>('select (select count(*) from agent_rate_limits) a, (select count(*) from agent_audit_log) b');
     for (let i = 0; i < 5; i++) await send(rpcBody('tools/list'), { headers: { authorization: 'Bearer garbage' } });
+    for (let i = 0; i < 5; i++) await send(rpcBody('tools/list'), { url: `http://localhost:3000/api/mcp?k=${generateAgentToken().token}` });
     const after = await sql<{ n: string }>('select (select count(*) from agent_rate_limits) a, (select count(*) from agent_audit_log) b');
     expect(after).toEqual(before);
   });

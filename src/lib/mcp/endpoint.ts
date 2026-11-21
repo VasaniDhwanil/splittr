@@ -34,7 +34,10 @@ export const FAILED_AUTH_PER_MINUTE = 30;
 const NEW_TOKEN_HINT =
   'Create a new token under Agent access on your Splittr profile page (https://www.splittr.cash/profile).';
 
-const AUTH_MESSAGES: Record<ResolveFailure | 'missing', string> = {
+const UNAVAILABLE_MESSAGE =
+  'Splittr is temporarily unavailable. Your access token is fine: try again shortly.';
+
+const AUTH_MESSAGES: Record<Exclude<ResolveFailure, 'unavailable'> | 'missing', string> = {
   missing: `No access token was sent. Send it as "Authorization: Bearer <token>". ${NEW_TOKEN_HINT}`,
   malformed: `That is not a Splittr access token (they start with spl_pat_). ${NEW_TOKEN_HINT}`,
   unknown: `That access token is not recognised. ${NEW_TOKEN_HINT}`,
@@ -57,7 +60,7 @@ function respond(status: number, code: number, message: string, extra: { reason?
   );
 }
 
-function authFailure(ip: string, reason: ResolveFailure | 'missing', detail?: string): Response {
+function authFailure(ip: string, reason: Exclude<ResolveFailure, 'unavailable'> | 'missing', detail?: string): Response {
   const counted = rateLimit(`mcp-auth-fail:${ip}`, FAILED_AUTH_PER_MINUTE, 60_000);
   if (!counted.allowed) {
     return respond(429, -32002, 'Too many failed attempts. Wait a minute and try again.', {
@@ -178,7 +181,10 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
 
     const leaked = tokensInQuery(new URL(request.url));
     if (leaked.length > 0) {
-      const revoked = await revokeLeakedTokens(request, leaked);
+      // Each lookup is counted against the failed-auth budget first: past it, the database is not asked
+      const ip = requestIp(request);
+      const affordable = leaked.filter(() => rateLimit(`mcp-auth-fail:${ip}`, FAILED_AUTH_PER_MINUTE, 60_000).allowed);
+      const revoked = affordable.length > 0 && (await revokeLeakedTokens(request, affordable));
       return respond(401, -32001, revoked ? LEAKED_MESSAGE : LEAKED_UNKNOWN_MESSAGE, { reason: 'token_in_url' });
     }
 
@@ -194,7 +200,12 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
     if (token === null) return authFailure(ip, 'missing');
     // Shape is checked before any database call, inside resolveAgentToken
     const resolved = await resolveAgentToken(token);
-    if (!resolved.ok) return authFailure(ip, resolved.reason, resolved.detail);
+    if (!resolved.ok) {
+      if (resolved.reason === 'unavailable') {
+        return respond(503, -32003, UNAVAILABLE_MESSAGE, { reason: 'unavailable', headers: { 'Retry-After': '5' } });
+      }
+      return authFailure(ip, resolved.reason, resolved.detail);
+    }
     const { actor } = resolved;
 
     await touchAgentToken(actor.tokenId, ip);

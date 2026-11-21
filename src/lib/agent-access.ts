@@ -18,10 +18,12 @@ export interface Actor {
   scopes: AgentScope[];
 }
 
-export type ResolveFailure = 'malformed' | 'unknown' | 'expired' | 'revoked' | 'suspended';
+export type ResolveFailure = 'malformed' | 'unknown' | 'expired' | 'revoked' | 'suspended' | 'unavailable';
 export type ResolveResult =
   | { ok: true; actor: Actor }
   | { ok: false; reason: ResolveFailure; /** Why a suspended token was paused. */ detail?: string };
+
+/** 'unavailable' means the database could not answer: the token may well be fine. */
 
 /** A malformed value is rejected before any database call. */
 export async function resolveAgentToken(token: unknown): Promise<ResolveResult> {
@@ -32,7 +34,8 @@ export async function resolveAgentToken(token: unknown): Promise<ResolveResult> 
     .select('id, user_id, scopes, expires_at, revoked_at, suspended_at, suspended_reason')
     .eq('token_hash', hashAgentToken(token))
     .maybeSingle();
-  if (error || !data) return { ok: false, reason: 'unknown' };
+  if (error) return { ok: false, reason: 'unavailable' };
+  if (!data) return { ok: false, reason: 'unknown' };
 
   if (data.revoked_at) return { ok: false, reason: 'revoked' };
   if (data.suspended_at) return { ok: false, reason: 'suspended', detail: data.suspended_reason ?? undefined };
