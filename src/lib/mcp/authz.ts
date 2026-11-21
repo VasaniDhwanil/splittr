@@ -337,6 +337,27 @@ export async function findActorGroups(actor: Actor): Promise<GroupSummary[]> {
   }));
 }
 
+/**
+ * Of these accounts, the ones that are current members of a group the actor is
+ * also a current member of: the only people whose profile name the web would
+ * show the actor.
+ */
+export async function accountsSharingGroup(actor: Actor, userIds: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  const groups = await actorGroupIds(actor);
+  if (groups.length === 0) return out;
+  for (const ids of chunks([...new Set(userIds)].map(uuid))) {
+    const { data, error } = await createAdminClient()
+      .from('group_members')
+      .select('user_id')
+      .in('group_id', groups.map(uuid))
+      .in('user_id', ids);
+    if (error) throw new Error('group_members read failed');
+    for (const row of data ?? []) out.add(row.user_id as string);
+  }
+  return out;
+}
+
 export interface ProfileRow {
   user_id: string;
   display_name: string | null;

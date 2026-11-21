@@ -194,3 +194,110 @@ describe('get_balances', () => {
     expect(out.balances.some((b) => b.amount === 16.67 && b.direction === 'you_owe' && !b.pay_with)).toBe(true);
   });
 });
+
+// A fresh actor per test, so the shared scenario above keeps its exact numbers
+const SECRET = 'Secret Profile Name';
+const owedBy = async (actor: TestUser) => {
+  const { token } = await insertToken(actor);
+  const res = await callTool(token, 'get_balances', {});
+  expect(res.isError).toBe(false);
+  return res.data as { balances: Row[]; notes: string[] };
+};
+/** A creditor: hosts one bill under `typedName`, the actor owes half. */
+const creditor = async (actor: TestUser, typedName: string, opts: { profileName?: string; venmo?: string; createdAt?: string; groupId?: string } = {}) => {
+  const user = await createUser('cred', opts.profileName ?? `${SECRET} ${Math.random().toString(36).slice(2, 8)}`);
+  if (opts.venmo) await setProfile(user, { venmo_handle: opts.venmo });
+  const bill = await createBill({
+    creator: user,
+    hostName: typedName,
+    items: [{ name: 'Everything', price: 20, quantity: 1 }],
+    groupId: opts.groupId ?? null,
+    extra: { split_mode: 'even', ...(opts.createdAt ? { created_at: opts.createdAt } : {}) },
+  });
+  await joinBill(bill.id, { name: 'Me', user: actor });
+  return { user, billId: bill.id };
+};
+
+describe('get_balances names (what the web would show)', () => {
+  it('uses the typed name, never the profile name, for someone outside every common group', async () => {
+    const actor = await createUser('actor', 'Actor');
+    await creditor(actor, 'Dinner host');
+    const out = await owedBy(actor);
+    expect(out.balances.map((b) => b.untrusted_name)).toEqual(['Dinner host']);
+    expect(JSON.stringify(out)).not.toContain(SECRET);
+  });
+
+  it('uses the typed name from the most recent bill when it varies and no group is shared', async () => {
+    const actor = await createUser('actor', 'Actor');
+    const first = await creditor(actor, 'Old name', { createdAt: '2026-01-01T10:00:00Z' });
+    const newer = await createBill({
+      creator: first.user,
+      hostName: 'New name',
+      items: [{ name: 'x', price: 20, quantity: 1 }],
+      extra: { split_mode: 'even', created_at: '2026-03-01T10:00:00Z' },
+    });
+    await joinBill(newer.id, { name: 'Me', user: actor });
+    const out = await owedBy(actor);
+    expect(out.balances).toHaveLength(1);
+    expect(out.balances[0].untrusted_name).toBe('New name');
+    expect(JSON.stringify(out)).not.toContain(SECRET);
+  });
+
+  it('uses the profile name when both are current members of a common group, and not after they leave', async () => {
+    const actor = await createUser('actor', 'Actor');
+    const owner = await createUser('owner');
+    const friend = await createUser('friend', 'Friendly Profile');
+    const group = await createGroup(owner, [actor, friend]);
+    const bill = await createBill({ creator: friend, hostName: 'typed host', items: [{ name: 'x', price: 20, quantity: 1 }], extra: { split_mode: 'even' } });
+    await joinBill(bill.id, { name: 'Me', user: actor });
+    expect((await owedBy(actor)).balances.map((b) => b.untrusted_name)).toEqual(['Friendly Profile']);
+
+    await db().from('group_members').delete().eq('group_id', group.id).eq('user_id', friend.id);
+    const after = await owedBy(actor);
+    expect(after.balances.map((b) => b.untrusted_name)).toEqual(['typed host']);
+    expect(JSON.stringify(after)).not.toContain('Friendly Profile');
+  });
+});
+
+describe('get_balances look-alike names', () => {
+  const venmoOf = (out: { balances: Row[] }, name: string) => out.balances.find((b) => b.untrusted_name === name);
+
+  it('a name mixing Latin with Cyrillic gets no handles, with a note; an honest Latin one keeps them', async () => {
+    const actor = await createUser('actor', 'Actor');
+    await creditor(actor, 'Alex', { venmo: '@real-alex' });
+    await creditor(actor, 'Аlex', { venmo: '@fake-alex' }); // Cyrillic A
+    const out = await owedBy(actor);
+    expect(venmoOf(out, 'Аlex')).toBeDefined();
+    expect(venmoOf(out, 'Аlex')).not.toHaveProperty('pay_with');
+    expect(venmoOf(out, 'Alex')!.pay_with).toEqual({ venmo: '@real-alex' });
+    expect(out.notes.join(' ')).toMatch(/mixes Latin letters with Cyrillic or Greek/);
+    expect(JSON.stringify(out)).not.toContain('fake-alex');
+  });
+
+  it('a Greek mix is refused too', async () => {
+    const actor = await createUser('actor', 'Actor');
+    await creditor(actor, 'Bοb', { venmo: '@omicron' }); // Greek omicron
+    expect((await owedBy(actor)).balances[0]).not.toHaveProperty('pay_with');
+  });
+
+  it('names that differ only by case, spacing or width collide and lose handles', async () => {
+    const actor = await createUser('actor', 'Actor');
+    await creditor(actor, 'Alex ', { venmo: '@one' });
+    await creditor(actor, 'alex', { venmo: '@two' });
+    await creditor(actor, 'A l e x', { venmo: '@three' });
+    await creditor(actor, 'Ａlex', { venmo: '@four' }); // fullwidth A
+    const out = await owedBy(actor);
+    expect(out.balances).toHaveLength(4);
+    for (const row of out.balances) expect(row).not.toHaveProperty('pay_with');
+    expect(out.notes.join(' ')).toMatch(/share a display name/);
+  });
+
+  it('a unique all-Cyrillic or all-Latin name keeps its handles', async () => {
+    const actor = await createUser('actor', 'Actor');
+    await creditor(actor, 'Алекс', { venmo: '@cyrillic' });
+    await creditor(actor, 'Maria', { venmo: '@latin' });
+    const out = await owedBy(actor);
+    expect(venmoOf(out, 'Алекс')!.pay_with).toEqual({ venmo: '@cyrillic' });
+    expect(venmoOf(out, 'Maria')!.pay_with).toEqual({ venmo: '@latin' });
+  });
+});
