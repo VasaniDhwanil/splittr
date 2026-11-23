@@ -147,7 +147,7 @@ describe('AgentAccess section', () => {
     expect(screen.getByText('Connect Claude')).toBeInTheDocument();
     expect(screen.getByText('claude mcp add --transport http splittr https://www.splittr.cash/api/mcp')).toBeInTheDocument();
     expect(screen.getByText(/Add custom connector/)).toBeInTheDocument();
-    expect(screen.getByText(/with www, and nothing after/)).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.tagName === 'P' && /with www, and nothing after/.test(el.textContent ?? ''))).toBeInTheDocument();
     expect(screen.getByText(/For other apps, or if you prefer not to sign in/)).toBeInTheDocument();
     // Turn back on a paused connection
     fireEvent.click(within(list).getByRole('button', { name: 'Turn back on' }));
