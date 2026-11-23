@@ -138,20 +138,30 @@ function listenForRedirect() {
 async function connectAs({ label, clientId, redirectUri, loopback, page, user }) {
   console.log(`\n=== ${label} ===`);
   const dest = loopback ? 'loopback' : 'claude.ai';
-  const browserJson = (path, init) =>
-    page.evaluate(
-      async ([p, i]) => {
-        const res = await fetch(p, i);
-        let body = null;
-        try {
-          body = await res.json();
-        } catch {
-          // no body
-        }
-        return { status: res.status, body };
-      },
-      [path, init]
-    );
+  const browserJson = async (path, init) => {
+    // `next dev` may navigate or reload the (404) page it just served: retry when the page moved under us
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await page.waitForLoadState('load');
+        return await page.evaluate(
+          async ([p, i]) => {
+            const res = await fetch(p, i);
+            let body = null;
+            try {
+              body = await res.json();
+            } catch {
+              // no body
+            }
+            return { status: res.status, body };
+          },
+          [path, init]
+        );
+      } catch (error) {
+        if (attempt >= 4 || !/context was destroyed|navigation/i.test(String(error))) throw error;
+        await sleep(500);
+      }
+    }
+  };
   const post = (path, body) =>
     browserJson(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
