@@ -12,13 +12,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     if (!UUID.test(id)) return notFound();
 
-    const { data, error } = await createAdminClient()
-      .from('agent_tokens')
-      .update({ suspended_at: null, suspended_reason: null })
-      .eq('id', id)
-      .eq('user_id', guard.user.id)
-      .is('revoked_at', null)
-      .select('id');
+    const db = createAdminClient();
+    const resume = (live: boolean) => {
+      const query = db
+        .from('agent_tokens')
+        .update({ suspended_at: null, suspended_reason: null })
+        .eq('id', id)
+        .eq('user_id', guard.user.id)
+        .is('revoked_at', null);
+      // A pending OAuth grant (approved, never redeemed) is not a connection and cannot be resumed
+      return (live ? query.or('oauth_status.is.null,oauth_status.eq.live') : query).select('id');
+    };
+    let { data, error } = await resume(true);
+    // Before migration 019 there is no oauth_status column (42703)
+    if (error?.code === '42703') ({ data, error } = await resume(false));
     if (error) {
       console.error('agent-token resume failed:', error.code);
       return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

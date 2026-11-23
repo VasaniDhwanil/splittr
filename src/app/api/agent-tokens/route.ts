@@ -44,32 +44,60 @@ export async function GET() {
 
     // Active tokens, plus revoked or expired ones for 30 days
     const cutoff = new Date(Date.now() - LIST_WINDOW_MS).toISOString();
-    const { data, error } = await createAdminClient()
-      .from('agent_tokens')
-      .select(
-        'id, name, last4, scopes, created_at, expires_at, last_used_at, last_used_ip, suspended_at, suspended_reason, revoked_at, revoked_reason'
-      )
-      .eq('user_id', user.id)
-      .or(`and(revoked_at.is.null,expires_at.gt.${cutoff}),revoked_at.gt.${cutoff}`)
-      .order('created_at', { ascending: false });
+    const BASE_COLUMNS =
+      'id, name, last4, scopes, created_at, expires_at, last_used_at, last_used_ip, suspended_at, suspended_reason, revoked_at, revoked_reason';
+    const db = createAdminClient();
+    const list = (columns: string) =>
+      db
+        .from('agent_tokens')
+        .select(columns)
+        .eq('user_id', user.id)
+        .or(`and(revoked_at.is.null,expires_at.gt.${cutoff}),revoked_at.gt.${cutoff}`)
+        .order('created_at', { ascending: false });
+    // Before migration 019 there is no kind column (42703): everything is a personal token
+    let result = await list(`${BASE_COLUMNS}, kind, oauth_destination, oauth_status`);
+    if (result.error?.code === '42703') result = await list(BASE_COLUMNS);
+    const { error } = result;
     if (error) {
       console.error('agent-tokens list failed:', error.code);
       return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
 
-    const tokens = (data ?? []).map((row) => ({
-      id: row.id,
-      name: row.name,
-      last4: row.last4,
-      scopes: row.scopes,
-      created_at: row.created_at,
-      expires_at: row.expires_at,
-      last_used_at: row.last_used_at,
-      last_used_ip: row.last_used_ip,
-      status: statusOf(row),
-      suspended_reason: row.suspended_reason,
-      revoked_reason: row.revoked_reason,
-    }));
+    type Row = {
+      id: string;
+      name: string;
+      last4: string | null;
+      scopes: string[];
+      created_at: string;
+      expires_at: string;
+      last_used_at: string | null;
+      last_used_ip: string | null;
+      suspended_at: string | null;
+      suspended_reason: string | null;
+      revoked_at: string | null;
+      revoked_reason: string | null;
+      kind?: 'pat' | 'oauth';
+      oauth_destination?: 'claude.ai' | 'loopback' | null;
+      oauth_status?: 'pending' | 'live' | null;
+    };
+    const tokens = ((result.data ?? []) as unknown as Row[])
+      // A grant that was approved but never redeemed is not a connection yet (it never will be once its code expires)
+      .filter((row) => row.oauth_status !== 'pending')
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        kind: row.kind ?? 'pat',
+        ...(row.kind === 'oauth' ? { destination: row.oauth_destination } : {}),
+        last4: row.kind === 'oauth' ? null : row.last4,
+        scopes: row.scopes,
+        created_at: row.created_at,
+        expires_at: row.expires_at,
+        last_used_at: row.last_used_at,
+        last_used_ip: row.last_used_ip,
+        status: statusOf(row),
+        suspended_reason: row.suspended_reason,
+        revoked_reason: row.revoked_reason,
+      }));
     return NextResponse.json({ enabled: true, mcp_url, tokens }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     console.error('Error in agent-tokens GET:', error instanceof Error ? error.message : 'unknown');
