@@ -378,7 +378,7 @@ describe('listing tokens', () => {
     const created = json.tokens.map((t: { created_at: string }) => Date.parse(t.created_at));
     expect([...created].sort((a, b) => b - a)).toEqual(created);
     expect(Object.keys(json.tokens[0]).sort()).toEqual(
-      ['created_at', 'expires_at', 'id', 'last4', 'last_used_at', 'last_used_ip', 'name', 'revoked_reason', 'scopes', 'status', 'suspended_reason'].sort()
+      ['created_at', 'expires_at', 'id', 'kind', 'last4', 'last_used_at', 'last_used_ip', 'name', 'revoked_reason', 'scopes', 'status', 'suspended_reason'].sort()
     );
   });
 });
