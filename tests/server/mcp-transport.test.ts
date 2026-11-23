@@ -171,7 +171,7 @@ describe('authentication', () => {
         if (statSync(path).isDirectory()) {
           if (path === join(root, 'mcp')) continue;
           walk(path);
-        } else if (/^route\.tsx?$/.test(entry) && /authorization/i.test(readFileSync(path, 'utf8'))) {
+        } else if (/^route\.tsx?$/.test(entry) && /['"]authorization['"]/i.test(readFileSync(path, 'utf8'))) {
           offenders.push(path);
         }
       }
@@ -180,8 +180,9 @@ describe('authentication', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('publishes no OAuth discovery routes', () => {
-    expect(existsSync(join(process.cwd(), 'src/app/.well-known'))).toBe(false);
+  it('publishes only our own OAuth discovery routes (404 unless OAuth is on)', () => {
+    const wellKnown = join(process.cwd(), 'src/app/.well-known');
+    expect(readdirSync(wellKnown).sort()).toEqual(['oauth-authorization-server', 'oauth-protected-resource']);
     expect(existsSync(join(process.cwd(), 'src/app/api/.well-known'))).toBe(false);
     expect(existsSync(join(process.cwd(), 'public/.well-known'))).toBe(false);
   });

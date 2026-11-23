@@ -26,6 +26,8 @@ const NO_SESSION: Record<string, string> = {
   '/api/mcp': 'authenticates with a bearer token only (covered by mcp-authz tests)',
   '/api/scan': 'anonymous receipt scan, rate limited by IP',
   '/api/agent-tokens/revoke-link': 'the "not you?" link works without a session on purpose',
+  '/api/oauth/token': 'our own OAuth token endpoint: public clients, no cookies (excluded from the proxy)',
+  '/api/oauth/revoke': 'our own OAuth revocation endpoint: public clients, no cookies (excluded from the proxy)',
 };
 // Routes whose empty probe request is refused (validation, origin) before the
 // session matters, so the check above cannot tell them apart from a guard that
@@ -36,6 +38,12 @@ const BLIND_TO_EMPTY_REQUESTS: string[] = [
   '/api/claims',
   '/api/claims/batch',
   '/api/participants',
+  // The consent APIs refuse an empty probe at the binding cookie; their
+  // session guard is exercised in oauth-consent.test.ts
+  '/api/agent-oauth/requests/[id]',
+  '/api/agent-oauth/requests/[id]/approve',
+  '/api/agent-oauth/requests/[id]/code',
+  '/api/agent-oauth/requests/[id]/deny',
 ];
 const SESSION_MACHINERY = /supabase\/server|guardAgentSession|auth-helpers/;
 

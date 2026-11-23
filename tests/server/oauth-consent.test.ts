@@ -197,6 +197,16 @@ describe('GET /api/agent-oauth/requests/[id]', () => {
     expect((await call(getConsent, await seedRequest(user), 'GET')).status).toBe(401);
   });
 
+  it('every consent API treats an OAuth-client session as signed out (R-O1)', async () => {
+    const user = await createUser('r-o1-post');
+    const { signInAsOAuthClient } = await import('./helpers/session');
+    signInAsOAuthClient(user);
+    const req = await seedRequest(user);
+    for (const handler of [sendCode, approve, deny]) {
+      expect((await call(handler, req, 'POST', { body: { scopes: ['read'] } })).status).toBe(401);
+    }
+  });
+
   it('is claimed by the first signed-in account that presents the cookie; nobody else gets it', async () => {
     const first = await createUser('first');
     const second = await createUser('second');
