@@ -2,8 +2,6 @@
  * Resolves an OAuth access token to the v1 Actor, for /api/mcp. Same shape as
  * resolveAgentToken in agent-access.ts so the endpoint can treat both kinds
  * alike. Malformed values are refused before any database call.
- *
- * Not wired into /api/mcp yet (that is the next work package).
  */
 import type { Actor } from '@/lib/agent-access';
 import type { AgentScope } from '@/lib/agent-tokens';

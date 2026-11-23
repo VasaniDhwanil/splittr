@@ -21,6 +21,9 @@ import { deleteUnapprovedProposals } from '@/lib/agent-bills';
 import { buildAgentTokenStoppedEmail } from '@/lib/agent-emails';
 import { hashAgentToken, isAgentAccessEnabled, isWellFormedAgentToken } from '@/lib/agent-tokens';
 import { sendEmail } from '@/lib/email';
+import { isOAuthEnabled, oauthIssuer } from '@/lib/oauth/config';
+import { resolveOAuthAccessToken } from '@/lib/oauth/resolve';
+import { hashOAuthSecret, parseOAuthToken } from '@/lib/oauth/tokens';
 import { rateLimit } from '@/lib/rate-limit';
 import { siteOrigin } from '@/lib/site-origin';
 import { MAX_BODY_BYTES, serveMcp } from './server';
@@ -46,6 +49,14 @@ const AUTH_MESSAGES: Record<Exclude<ResolveFailure, 'unavailable'> | 'missing', 
   suspended: `That access token is paused. Turn it back on, or create a new token, under Agent access on your Splittr profile page (https://www.splittr.cash/profile).`,
 };
 
+const OAUTH_MESSAGES = {
+  missing: 'No access token was sent. Connect Splittr from your Claude settings, or send a personal token as "Authorization: Bearer <token>".',
+  invalid: 'That access token is not valid. Reconnect Splittr from your Claude settings.',
+  expired: 'That access token has expired. Refresh it, or reconnect Splittr from your Claude settings.',
+  revoked: 'That connection was disconnected. Reconnect Splittr from your Claude settings.',
+} as const;
+const OAUTH_DISABLED_MESSAGE = 'Sign-in with Claude is not available right now. Try again later, or use a personal token.';
+
 const LEAKED_MESSAGE = `An access token was sent in the URL, so it was revoked: URLs end up in logs. Send tokens only in the Authorization header. ${NEW_TOKEN_HINT}`;
 const LEAKED_UNKNOWN_MESSAGE = `Access tokens must be sent in the Authorization header, never in the URL. ${NEW_TOKEN_HINT}`;
 
@@ -58,6 +69,39 @@ function respond(status: number, code: number, message: string, extra: { reason?
     }),
     { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra.headers } }
   );
+}
+
+/** The Origins that may call /api/mcp from a browser: this site, and claude.ai once OAuth is on. */
+function isAllowedMcpOrigin(request: Request): boolean {
+  const origin = request.headers.get('origin');
+  if (!origin) return true;
+  if (isSameSiteOrigin(request)) return true;
+  return origin === 'https://claude.ai' && isOAuthEnabled();
+}
+
+/** The 401 that sends an OAuth-capable client to sign in (RFC 9728). `error` only when a token was presented. */
+function oauthChallenge(tokenPresented: boolean): string {
+  const parts = [
+    `resource_metadata="${oauthIssuer()}/.well-known/oauth-protected-resource/api/mcp"`,
+    'scope="read bills:write"',
+  ];
+  if (tokenPresented) parts.push('error="invalid_token"');
+  return `Bearer ${parts.join(', ')}`;
+}
+
+function oauthUnauthorized(reason: 'missing' | 'malformed' | 'unknown' | 'expired' | 'revoked'): Response {
+  const message =
+    reason === 'missing'
+      ? OAUTH_MESSAGES.missing
+      : reason === 'expired'
+        ? OAUTH_MESSAGES.expired
+        : reason === 'revoked'
+          ? OAUTH_MESSAGES.revoked
+          : OAUTH_MESSAGES.invalid;
+  return respond(401, -32001, message, {
+    reason,
+    headers: { 'WWW-Authenticate': oauthChallenge(reason !== 'missing') },
+  });
 }
 
 function authFailure(ip: string, reason: Exclude<ResolveFailure, 'unavailable'> | 'missing', detail?: string): Response {
@@ -82,8 +126,8 @@ function tokensInQuery(url: URL): string[] {
   }
   const found = new Set<string>();
   for (const text of [url.search, decoded]) {
-    for (const match of text.matchAll(/spl_pat_[A-Za-z0-9_-]{43}/g)) {
-      if (isWellFormedAgentToken(match[0])) found.add(match[0]);
+    for (const match of text.matchAll(/spl_(?:pat_[A-Za-z0-9_-]{43}|o[ar]t_[A-Za-z0-9_-]{43}_[A-Za-z0-9_-]{8})/g)) {
+      if (isWellFormedAgentToken(match[0]) || parseOAuthToken(match[0]) !== null) found.add(match[0]);
       if (found.size >= 3) return [...found];
     }
   }
@@ -96,10 +140,20 @@ async function revokeLeakedTokens(request: Request, tokens: string[]): Promise<b
   const now = new Date().toISOString();
   let revokedAny = false;
   for (const token of tokens) {
-    const { data, error } = await db
-      .from('agent_tokens')
-      .update({ revoked_at: now, revoked_reason: 'query_string' })
-      .eq('token_hash', hashAgentToken(token))
+    let query = db.from('agent_tokens').update({ revoked_at: now, revoked_reason: 'query_string' });
+    if (token.startsWith('spl_pat_')) {
+      query = query.eq('token_hash', hashAgentToken(token));
+    } else {
+      // An OAuth token belongs to a grant: find it, then revoke the grant (its tokens go with it)
+      const { data: found, error: lookupError } = await db
+        .from('agent_oauth_tokens')
+        .select('grant_id')
+        .eq('hash', hashOAuthSecret(token))
+        .maybeSingle();
+      if (lookupError || !found) continue;
+      query = query.eq('id', found.grant_id).eq('kind', 'oauth');
+    }
+    const { data, error } = await query
       .is('revoked_at', null)
       .gt('expires_at', now)
       .select('id, user_id, name');
@@ -175,7 +229,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       return respond(503, -32003, 'Agent access is not available right now.', { reason: 'disabled' });
     }
 
-    if (request.headers.get('origin') && !isSameSiteOrigin(request)) {
+    if (!isAllowedMcpOrigin(request)) {
       return respond(403, -32004, 'Browser requests from other sites are not allowed.', { reason: 'bad_origin' });
     }
 
@@ -183,7 +237,8 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
     if (leaked.length > 0) {
       // Each lookup is counted against the failed-auth budget first: past it, the database is not asked
       const ip = requestIp(request);
-      const affordable = leaked.filter(() => rateLimit(`mcp-auth-fail:${ip}`, FAILED_AUTH_PER_MINUTE, 60_000).allowed);
+      // Only personal tokens cost budget: an OAuth token that passes its keyed check was genuinely issued
+      const affordable = leaked.filter((token) => !token.startsWith('spl_pat_') || rateLimit(`mcp-auth-fail:${ip}`, FAILED_AUTH_PER_MINUTE, 60_000).allowed);
       const revoked = affordable.length > 0 && (await revokeLeakedTokens(request, affordable));
       return respond(401, -32001, revoked ? LEAKED_MESSAGE : LEAKED_UNKNOWN_MESSAGE, { reason: 'token_in_url' });
     }
@@ -197,16 +252,45 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
 
     const ip = requestIp(request);
     const token = bearerToken(request);
-    if (token === null) return authFailure(ip, 'missing');
-    // Shape is checked before any database call, inside resolveAgentToken
-    const resolved = await resolveAgentToken(token);
-    if (!resolved.ok) {
-      if (resolved.reason === 'unavailable') {
-        return respond(503, -32003, UNAVAILABLE_MESSAGE, { reason: 'unavailable', headers: { 'Retry-After': '5' } });
+    const oauthOn = isOAuthEnabled();
+
+    let actor;
+    if (token === null && oauthOn) {
+      // A missing credential is how every first connection starts: never counted
+      return oauthUnauthorized('missing');
+    } else if (token === null) {
+      return authFailure(ip, 'missing');
+    } else if (token.startsWith('spl_oat_')) {
+      if (!oauthOn) {
+        return respond(503, -32003, OAUTH_DISABLED_MESSAGE, { reason: 'oauth_disabled', headers: { 'Retry-After': '60' } });
       }
-      return authFailure(ip, resolved.reason, resolved.detail);
+      const resolved = await resolveOAuthAccessToken(token);
+      if (!resolved.ok) {
+        if (resolved.reason === 'unavailable') {
+          return respond(503, -32003, UNAVAILABLE_MESSAGE, { reason: 'unavailable', headers: { 'Retry-After': '5' } });
+        }
+        return oauthUnauthorized(resolved.reason);
+      }
+      if (resolved.suspended) {
+        // A 401 would make the client start a new sign-in, which would bypass the breaker
+        const why = resolved.detail ? ` Why: ${resolved.detail}` : '';
+        return respond(403, -32001, AUTH_MESSAGES.suspended + why, { reason: 'suspended' });
+      }
+      actor = resolved.actor;
+    } else if (oauthOn && !token.startsWith('spl_pat_')) {
+      // spl_ort_ (a refresh token) or anything else: not a credential here, and not counted
+      return oauthUnauthorized('malformed');
+    } else {
+      // The v1 path, exactly. Shape is checked before any database call, inside resolveAgentToken
+      const resolved = await resolveAgentToken(token);
+      if (!resolved.ok) {
+        if (resolved.reason === 'unavailable') {
+          return respond(503, -32003, UNAVAILABLE_MESSAGE, { reason: 'unavailable', headers: { 'Retry-After': '5' } });
+        }
+        return authFailure(ip, resolved.reason, resolved.detail);
+      }
+      actor = resolved.actor;
     }
-    const { actor } = resolved;
 
     await touchAgentToken(actor.tokenId, ip);
 
