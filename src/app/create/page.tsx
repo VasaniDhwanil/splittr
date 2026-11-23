@@ -20,6 +20,7 @@ import { Segmented } from '@/components/create/segmented';
 import { ChoicePill } from '@/components/create/choice-pill';
 import { Field, FIELD_INPUT, FIELD_LABEL } from '@/components/create/field';
 import { SummaryRow } from '@/components/create/summary-row';
+import { prepareReceiptImage, UnsupportedImageError } from '@/lib/prepare-receipt-image';
 
 interface BillItem {
   name: string;
@@ -158,8 +159,19 @@ export default function CreatePage() {
     setIsScanning(true);
 
     try {
+      let upload: File;
+      try {
+        upload = await prepareReceiptImage(file);
+      } catch (error) {
+        if (error instanceof UnsupportedImageError) {
+          toast.error("Can't read that photo", { description: error.message });
+          return;
+        }
+        throw error;
+      }
+
       const formData = new FormData();
-      formData.append('receipt', file);
+      formData.append('receipt', upload);
 
       const response = await fetch('/api/scan', {
         method: 'POST',
@@ -167,20 +179,34 @@ export default function CreatePage() {
       });
 
       if (!response.ok) {
+        // Vercel's own 413 is not JSON
         const body = await response.json().catch(() => ({}));
-        if (response.status === 422 || body.code === 'not_a_receipt') {
+        const code: string | undefined = body.code;
+        if (response.status === 422 || code === 'not_a_receipt') {
           toast.error("That doesn't look like a receipt", {
             description: 'Try a clearer photo of the bill, or enter the items manually below.',
           });
           return;
         }
-        if (response.status === 429) {
+        if (response.status === 429 || code === 'rate_limited') {
           toast.error('Too many scans right now', {
             description: body.error || 'Too many scans. Try again in a few minutes.',
           });
           return;
         }
-        throw new Error('Failed to scan receipt');
+        if (response.status === 413 || code === 'too_large') {
+          toast.error('That photo is too large', {
+            description: 'Try a smaller or lower-resolution photo, or enter the items manually below.',
+          });
+          return;
+        }
+        if (code === 'unsupported_image' || response.status === 400) {
+          toast.error("That isn't a supported image", {
+            description: 'Choose a JPEG or PNG photo of the bill, or enter the items manually below.',
+          });
+          return;
+        }
+        throw new Error(`Scan failed with status ${response.status}`);
       }
 
       const data: ScannedReceipt = await response.json();
@@ -191,7 +217,7 @@ export default function CreatePage() {
       toast.success('Receipt scanned successfully!');
     } catch (error) {
       console.error('Error scanning receipt:', error);
-      toast.error('Failed to scan receipt. Please try again or enter items manually.');
+      toast.error('The scan service ran into a problem. Please try again or enter items manually.');
     } finally {
       setIsScanning(false);
       // allow rescanning the same file
