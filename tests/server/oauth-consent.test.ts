@@ -24,6 +24,7 @@ vi.mock('@/lib/email', async (importOriginal) => {
   };
 });
 
+import { GET as authorize } from '@/app/oauth/authorize/route';
 import { GET as getConsent } from '@/app/api/agent-oauth/requests/[id]/route';
 import { POST as sendCode } from '@/app/api/agent-oauth/requests/[id]/code/route';
 import { POST as approve } from '@/app/api/agent-oauth/requests/[id]/approve/route';
@@ -77,7 +78,7 @@ const call = (
       method,
       headers: {
         'x-real-ip': randomIp(),
-        ...(opts.cookie === null ? {} : { cookie: `splittr-oauth=${opts.cookie ?? req.binding}` }),
+        ...(opts.cookie === null ? {} : { cookie: `splittr-oauth-${opts.id ?? req.id}=${opts.cookie ?? req.binding}` }),
         ...(method === 'POST' ? { 'content-type': 'application/json', ...ORIGIN } : {}),
         ...opts.headers,
       },
@@ -308,7 +309,7 @@ describe('POST .../code', () => {
     const req = await hostedRequest(user);
     signInAs(user);
     expect((await call(sendCode, req, 'POST', { headers: { origin: 'https://evil.example' } })).status).toBe(403);
-    const noOrigin = new NextRequest(`http://localhost:3199/api/agent-oauth/requests/${req.id}`, { method: 'POST', headers: { cookie: `splittr-oauth=${req.binding}` } });
+    const noOrigin = new NextRequest(`http://localhost:3199/api/agent-oauth/requests/${req.id}`, { method: 'POST', headers: { cookie: `splittr-oauth-${req.id}=${req.binding}` } });
     expect((await sendCode(noOrigin, params({ id: req.id }))).status).toBe(403);
     expect((await call(sendCode, req, 'POST', { cookie: null })).status).toBe(404);
     signOut();
@@ -688,5 +689,65 @@ describe('POST .../deny', () => {
     expect((await call(deny, req, 'POST')).status).toBe(404);
     signInAs(owner);
     expect((await call(deny, await seedRequest(owner, { expiresAt: new Date(Date.now() - 1000) }), 'POST')).status).toBe(404);
+  });
+});
+
+describe('the binding cookie is per request', () => {
+  const start = async (clientId: string, redirect: string) => {
+    const query = new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId,
+      redirect_uri: redirect,
+      code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+      code_challenge_method: 'S256',
+      state: 'st',
+    });
+    const res = await authorize(new NextRequest(`http://localhost:3199/oauth/authorize?${query}`, { headers: { 'x-real-ip': randomIp() } }));
+    expect(res.status).toBe(302);
+    const id = res.headers.get('location')!.split('/').pop()!;
+    const [name, value] = res.headers.get('set-cookie')!.split(';')[0].split('=');
+    return { id, name, value };
+  };
+  const asking = (jar: Record<string, string>, id: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
+    const cookie = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+    const req = new NextRequest(`http://localhost:3199/api/agent-oauth/requests/${id}${method === 'POST' ? '/approve' : ''}`, {
+      method,
+      headers: { 'x-real-ip': randomIp(), cookie, ...(method === 'POST' ? { 'content-type': 'application/json', ...ORIGIN } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    return method === 'GET' ? getConsent(req, params({ id })) : approve(req, params({ id }));
+  };
+
+  it('two connections started in one browser both work, and each cookie opens only its own request', async () => {
+    const user = await createUser('jar');
+    signInAs(user);
+    const a = await start(CLAUDE_CODE_CLIENT_ID, 'http://localhost:54321/callback');
+    const b = await start(CLAUDE_CODE_CLIENT_ID, 'http://localhost:54322/callback');
+    expect(a.name).toBe(`splittr-oauth-${a.id}`);
+    expect(b.name).toBe(`splittr-oauth-${b.id}`);
+    expect(a.name).not.toBe(b.name);
+
+    const jar = { [a.name]: a.value, [b.name]: b.value };
+    expect((await asking(jar, a.id)).status).toBe(200);
+    expect((await asking(jar, b.id)).status).toBe(200);
+    // B's cookie alone does not open A, and A's value under B's name does not either
+    expect((await asking({ [b.name]: b.value }, a.id)).status).toBe(404);
+    expect((await asking({ [b.name]: a.value }, b.id)).status).toBe(404);
+
+    // Approve both (a fresh email sign-in suffices for Claude Code)
+    setSessionAmr([{ method: 'otp', ageSeconds: 5 }]);
+    const first = await asking(jar, a.id, 'POST', { scopes: ['read'], replace: false });
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as { redirect_url: string }).redirect_url).toContain('http://localhost:54321/callback?code=');
+    const second = await asking(jar, b.id, 'POST', { scopes: ['read'], replace: false });
+    expect(second.status).toBe(200);
+    expect(((await second.json()) as { redirect_url: string }).redirect_url).toContain('http://localhost:54322/callback?code=');
+  });
+
+  it('the old shared cookie name no longer opens anything', async () => {
+    const user = await createUser('oldname');
+    signInAs(user);
+    const a = await start(CLAUDE_CODE_CLIENT_ID, 'http://localhost:54321/callback');
+    expect((await asking({ 'splittr-oauth': a.value }, a.id)).status).toBe(404);
   });
 });

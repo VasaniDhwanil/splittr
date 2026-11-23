@@ -69,7 +69,7 @@ export async function guardConsent(
   } = await supabase.auth.getUser();
   if (!user) return { response: noStore(unauthorized()) };
 
-  const cookie = request.cookies.get(bindingCookieName())?.value;
+  const cookie = request.cookies.get(bindingCookieName(id))?.value;
   if (!ID_SHAPE.test(id) || !cookie || !BINDING_COOKIE_SHAPE.test(cookie)) return { response: noStore(notFound()) };
 
   const db = createAdminClient();

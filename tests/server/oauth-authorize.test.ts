@@ -178,8 +178,8 @@ describe('a valid request', () => {
     const cookie = res.headers.get('set-cookie')!;
     const [pair, ...attrs] = cookie.split(';').map((s) => s.trim());
     const [name, value] = pair.split('=');
-    // http issuer (local runs): the __Host- prefix needs Secure, so the plain name
-    expect(name).toBe('splittr-oauth');
+    // http issuer (local runs): the __Host- prefix needs Secure, so the plain name, one cookie per request
+    expect(name).toBe(`splittr-oauth-${id}`);
     expect(value).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(attrs.map((a) => a.toLowerCase())).toEqual(expect.arrayContaining(['httponly', 'samesite=lax', 'path=/']));
     expect(attrs.map((a) => a.toLowerCase())).not.toContain('secure');
@@ -209,7 +209,8 @@ describe('a valid request', () => {
     process.env.VERCEL_ENV = 'production';
     const res = await get(good({ resource: 'https://www.splittr.cash/api/mcp' }));
     const cookie = res.headers.get('set-cookie')!;
-    expect(cookie.startsWith('__Host-splittr-oauth=')).toBe(true);
+    const id = location(res)!.split('/').pop()!;
+    expect(cookie.startsWith(`__Host-splittr-oauth-${id}=`)).toBe(true);
     expect(cookie.toLowerCase()).toContain('; secure');
     expect(cookie.toLowerCase()).not.toContain('domain=');
     expect(location(res)!.startsWith('https://www.splittr.cash/oauth/consent/')).toBe(true);

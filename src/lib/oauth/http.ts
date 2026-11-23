@@ -91,11 +91,15 @@ export async function readForm(request: Request): Promise<FormResult> {
 const secureIssuer = () => oauthIssuer().startsWith('https://');
 
 /**
- * `__Host-splittr-oauth` on https. A __Host- cookie must be Secure, which an
- * http origin (only ever http://localhost, for local runs) cannot hold, so
- * there the cookie is `splittr-oauth` without Secure.
+ * One cookie per authorization request: `__Host-splittr-oauth-<request id>` on
+ * https, so two connections started in one browser (two Claude Code windows,
+ * claude.ai and Claude Code) never overwrite each other. A __Host- cookie must
+ * be Secure, which an http origin (only ever http://localhost, for local runs)
+ * cannot hold, so there it is `splittr-oauth-<request id>` without Secure.
+ * The id is 22 base64url characters: valid in a cookie name.
  */
-export const bindingCookieName = () => (secureIssuer() ? '__Host-splittr-oauth' : 'splittr-oauth');
+export const bindingCookieName = (requestId: string) =>
+  `${secureIssuer() ? '__Host-splittr-oauth' : 'splittr-oauth'}-${requestId}`;
 
 export const bindingCookieOptions = (maxAgeSeconds: number) =>
   ({

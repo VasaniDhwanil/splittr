@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
       status: 302,
       headers: { Location: `${oauthIssuer()}/oauth/consent/${id}`, ...NO_STORE },
     });
-    response.cookies.set(bindingCookieName(), binding, bindingCookieOptions(REQUEST_TTL_SECONDS));
+    response.cookies.set(bindingCookieName(id), binding, bindingCookieOptions(REQUEST_TTL_SECONDS));
     return response;
   } catch (error) {
     console.error('Error in oauth authorize:', error instanceof Error ? error.message : 'unknown');
