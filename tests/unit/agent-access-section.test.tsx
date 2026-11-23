@@ -136,7 +136,7 @@ describe('AgentAccess section', () => {
       'DELETE /api/agent-tokens/o1': { body: { ok: true } },
     });
     render(<AgentAccess />);
-    expect(await screen.findByText('Claude (claude.ai)')).toBeInTheDocument();
+    expect((await screen.findAllByText('Claude (claude.ai)')).length).toBe(2);
     expect(screen.getByText('Claude Code on a computer')).toBeInTheDocument();
     const list = screen.getByRole('list', { name: 'Your Claude connections' });
     expect(within(list).getAllByText('Connected')).toHaveLength(3);
