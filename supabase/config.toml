@@ -248,6 +248,12 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# The same magic-link template the owner pastes into the dashboard, so local
+# sign-in emails carry the 6-digit code too.
+[auth.email.template.magic_link]
+subject = "Your Splittr sign-in link"
+content_path = "./supabase/email-templates/magic-link.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

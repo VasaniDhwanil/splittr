@@ -6,6 +6,8 @@
   Supabase template variables used:
     {{ .SiteURL }}    — the app's configured Site URL
     {{ .TokenHash }}  — one-time token, verified server-side by /auth/callback
+    {{ .Token }}      — the same sign-in as a 6-digit code, typed on /signin
+                        (keeps a person in the browser window Claude opened)
     {{ .RedirectTo }} — the emailRedirectTo the app requested (carries ?next=)
 
   Why token_hash instead of {{ .ConfirmationURL }}: the confirmation URL relies
@@ -32,7 +34,7 @@
         <tr>
           <td style="padding:0 40px 24px 40px;">
             <p style="margin:0;font-size:14px;color:rgba(255,255,255,0.55);line-height:1.6;">
-              Click the button below to sign in. No password needed — this link is good for one hour.
+              Click the button below to sign in, or type the code underneath on the sign-in page. No password needed.
             </p>
           </td>
         </tr>
@@ -42,6 +44,13 @@
                style="display:block;text-align:center;background:#ffffff;color:#000000;text-decoration:none;font-size:15px;font-weight:600;padding:14px 24px;border-radius:9999px;">
               Sign in to Splittr
             </a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 40px 0 40px;">
+            <p style="margin:0 0 8px 0;font-size:12px;color:rgba(255,255,255,0.45);line-height:1.6;">Or enter this code on the sign-in page</p>
+            <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.10);border-radius:12px;padding:14px 16px;text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:28px;font-weight:600;letter-spacing:8px;color:#ffffff;">{{ .Token }}</div>
+            <p style="margin:8px 0 0 0;font-size:12px;color:rgba(255,255,255,0.35);line-height:1.6;">The code works for a few minutes. The link works for one hour.</p>
           </td>
         </tr>
         <tr>
