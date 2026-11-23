@@ -64,7 +64,7 @@ describe('oauth_approve_request', () => {
     expect((await callApprove(owner, req, { binding: newBinding() })).result.status).toBe('not_found');
     expect((await callApprove(owner, await seedRequest(null))).result.status).toBe('not_found');
     expect((await callApprove(owner, await seedRequest(owner, { status: 'denied' }))).result.status).toBe('not_found');
-    expect((await callApprove(owner, { id: 'A'.repeat(22), binding: 'x' })).result.status).toBe('not_found');
+    expect((await callApprove(owner, { id: 'A'.repeat(22), binding: 'x', clientId: CLAUDE_CODE_CLIENT_ID })).result.status).toBe('not_found');
     expect((await callApprove(owner, req)).result.status).toBe('ok');
     // approving twice cannot make a second grant
     expect((await callApprove(owner, req)).result.status).toBe('not_found');
@@ -184,6 +184,26 @@ describe('oauth_approve_request: the emailed code', () => {
   it('is not needed when the app says a fresh sign-in is enough', async () => {
     const user = await createUser('fresh');
     expect((await callApprove(user, await seedRequest(user), { requireCode: false })).result.status).toBe('ok');
+  });
+});
+
+describe('oauth_approve_request: the hosted client (defence in depth)', () => {
+  it('refuses p_require_code = false for the hosted client, whatever the request holds', async () => {
+    const user = await createUser('hostedfn');
+    const req = await seedRequest(user, { clientId: HOSTED_CLIENT_ID, codeHmac: 'h', codeExpiresAt: new Date(Date.now() + 60_000) });
+    const refused = await callApprove(user, req, { requireCode: false, destination: 'claude.ai' });
+    expect(refused.result.status).toBe('code_required');
+    expect((await db().from('agent_tokens').select('id').eq('user_id', user.id)).data).toEqual([]);
+    expect((await db().from('agent_oauth_requests').select('status').eq('id', req.id).single()).data!.status).toBe('pending');
+    // with the code it goes through
+    const ok = await callApprove(user, req, { requireCode: true, codeHmac: 'h', destination: 'claude.ai' });
+    expect(ok.result.status).toBe('ok');
+  });
+
+  it('still lets Claude Code through without a code when the app says a fresh sign-in was enough', async () => {
+    const user = await createUser('codefn');
+    const req = await seedRequest(user, { clientId: CLAUDE_CODE_CLIENT_ID });
+    expect((await callApprove(user, req, { requireCode: false })).result.status).toBe('ok');
   });
 });
 

@@ -25,6 +25,7 @@ export const sha = hashOAuthSecret;
 export interface SeedRequest {
   id: string;
   binding: string;
+  clientId: string;
 }
 
 /** An authorization request as GET /oauth/authorize leaves it. */
@@ -64,7 +65,7 @@ export async function seedRequest(
       attempts: opts.attempts ?? 0,
     });
   if (error) throw new Error(`seedRequest failed: ${error.message}`);
-  return { id, binding };
+  return { id, binding, clientId };
 }
 
 export interface ApproveArgs {
@@ -80,14 +81,23 @@ export interface ApproveArgs {
 
 export async function callApprove(user: TestUser, req: SeedRequest, args: ApproveArgs = {}) {
   const code = generateAuthorizationCode();
+  // The function itself refuses a hosted-client approval without an emailed code: unless a test says
+  // otherwise, give the hosted client the code it needs
+  const hostedDefault = req.clientId === HOSTED_CLIENT_ID && args.requireCode === undefined;
+  if (hostedDefault) {
+    await db()
+      .from('agent_oauth_requests')
+      .update({ code_hmac: 'helper-code-hmac', code_expires_at: new Date(Date.now() + 600_000).toISOString() })
+      .eq('id', req.id);
+  }
   const { data, error } = await db().rpc('oauth_approve_request', {
     p_request_id: req.id,
     p_user_id: (args.user ?? user).id,
     p_binding_hash: sha(args.binding ?? req.binding),
     p_scopes: args.scopes ?? ['read'],
     p_replace: args.replace ?? false,
-    p_require_code: args.requireCode ?? false,
-    p_code_hmac: args.codeHmac ?? null,
+    p_require_code: args.requireCode ?? hostedDefault,
+    p_code_hmac: args.codeHmac ?? (hostedDefault ? 'helper-code-hmac' : null),
     p_code_hash: sha(code),
     p_grant_name: args.name ?? 'Claude Code',
     p_destination: args.destination ?? 'loopback',
@@ -133,7 +143,6 @@ export async function connect(
     scopes: opts.scopes,
     replace: opts.replace,
     destination: clientId === HOSTED_CLIENT_ID ? 'claude.ai' : 'loopback',
-    requireCode: false,
   });
   if (approved.status !== 'ok') throw new Error(`connect: approve gave ${approved.status}`);
   const { result, pair } = await callRedeem(code);

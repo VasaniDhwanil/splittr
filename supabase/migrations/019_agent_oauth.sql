@@ -336,6 +336,13 @@ BEGIN
     RETURN jsonb_build_object('status', 'expired');
   END IF;
 
+  -- Defence in depth: the app decides whether a step-up is needed, but the hosted
+  -- client's approval is never allowed without the emailed code, whatever the caller says
+  -- (HOSTED_CLIENT_REQUIRES_EMAILED_CODE in src/lib/oauth/stepup.ts, docs/specs/mcp-oauth.md A5)
+  IF NOT p_require_code AND req.client_id = 'https://claude.ai/oauth/mcp-oauth-client-metadata' THEN
+    RETURN jsonb_build_object('status', 'code_required');
+  END IF;
+
   IF p_scopes IS NULL OR cardinality(p_scopes) = 0 OR NOT ('read' = ANY (p_scopes))
      OR NOT (p_scopes <@ ARRAY['read', 'bills:write']::TEXT[]) THEN
     RETURN jsonb_build_object('status', 'invalid_input');

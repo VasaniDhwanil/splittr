@@ -488,6 +488,44 @@ describe('POST .../approve: the hosted client', () => {
   });
 });
 
+describe('POST .../approve: the hosted client is never approved without a valid emailed code', () => {
+  const grantsOf = async (user: TestUser) =>
+    (await db().from('agent_tokens').select('id').eq('user_id', user.id).eq('kind', 'oauth')).data ?? [];
+
+  for (const method of ['otp', 'magiclink'] as const) {
+    it(`a fresh ${method} sign-in, with no code, a wrong code, a malformed code or a pushy body: always refused, nothing created`, async () => {
+      const user = await createUser(`hostedfresh-${method}`);
+      signInAs(user);
+      setSessionAmr([{ method, ageSeconds: 1 }]);
+      const req = await hostedRequest(user);
+      const attempts: Record<string, unknown>[] = [
+        { scopes: ['read'] },
+        { scopes: ['read'], code: '' },
+        { scopes: ['read'], code: '000000' },
+        { scopes: ['read'], code: 'not-a-code' },
+        { scopes: ['read'], replace: true },
+        { scopes: ['read'], require_code: false, fresh_sign_in_ok: true, p_require_code: false },
+      ];
+      for (const body of attempts) {
+        const res = await call(approve, req, 'POST', { body });
+        expect(res.status, JSON.stringify(body)).toBe(400);
+        expect(['code_required', 'wrong_code']).toContain((await json(res)).code);
+      }
+      expect(await grantsOf(user)).toEqual([]);
+      expect((await db().from('agent_oauth_requests').select('status').eq('id', req.id).single()).data!.status).toBe('pending');
+      expect((await db().from('agent_oauth_codes').select('hash').eq('request_id', req.id)).data).toEqual([]);
+    });
+  }
+
+  it('the same fresh sign-in is enough for Claude Code, so the difference is the client', async () => {
+    const user = await createUser('codefresh');
+    signInAs(user);
+    setSessionAmr([{ method: 'otp', ageSeconds: 1 }]);
+    const req = await seedRequest(user);
+    expect((await call(approve, req, 'POST', { body: { scopes: ['read'] } })).status).toBe(200);
+  });
+});
+
 describe('POST .../approve: Claude Code', () => {
   const approveWith = (req: SeedRequest, body: Record<string, unknown>, opts = {}) => call(approve, req, 'POST', { body, ...opts });
 
