@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import {
+  deriveFirstPair,
   deriveSuccessors,
   generateAuthorizationCode,
-  generateOAuthTokenPair,
   hashOAuthSecret,
 } from '@/lib/oauth/tokens';
 import { CLAUDE_CODE_CLIENT_ID, HOSTED_CLIENT_ID } from '@/lib/oauth/clients';
@@ -97,8 +97,9 @@ export async function callApprove(user: TestUser, req: SeedRequest, args: Approv
   return { result: data as { status: string; grant_id?: string; attempts_left?: number; replaces?: number }, code };
 }
 
-export async function callRedeem(code: string, bindingsOk = true) {
-  const pair = generateOAuthTokenPair(TEST_PEPPER);
+export async function callRedeem(code: string, bindingsOk = true, pairOverride?: { access: string; refresh: string }) {
+  // Derived from the code, as the token endpoint does
+  const pair = pairOverride ?? deriveFirstPair(code, TEST_PEPPER);
   const { data, error } = await db().rpc('oauth_redeem_code', {
     p_code_hash: sha(code),
     p_bindings_ok: bindingsOk,
@@ -106,7 +107,7 @@ export async function callRedeem(code: string, bindingsOk = true) {
     p_refresh_hash: sha(pair.refresh),
   });
   if (error) throw new Error(`oauth_redeem_code failed: ${error.message}`);
-  return { result: data as { status: string; grant_id?: string; user_id?: string; replaced?: number }, pair };
+  return { result: data as { status: string; grant_id?: string; user_id?: string; replaced?: number; replay?: boolean }, pair };
 }
 
 export async function callRefresh(refresh: string, clientId = CLAUDE_CODE_CLIENT_ID) {

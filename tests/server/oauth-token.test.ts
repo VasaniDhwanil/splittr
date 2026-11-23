@@ -16,7 +16,8 @@ vi.mock('@/lib/email', async (importOriginal) => {
 import { POST as token } from '@/app/api/oauth/token/route';
 import { generateAgentToken } from '@/lib/agent-tokens';
 import { resetFailures } from '@/lib/oauth/throttle';
-import { generateOAuthTokenPair, parseOAuthToken } from '@/lib/oauth/tokens';
+import { deriveFirstPair, generateOAuthTokenPair, parseOAuthToken } from '@/lib/oauth/tokens';
+import { rpcBody, send } from './helpers/mcp';
 import { billExists, insertProposal } from './helpers/agent';
 import { createUser, db, sql } from './helpers/db';
 import {
@@ -196,6 +197,7 @@ describe('authorization_code', () => {
     const { code, grantId } = await approved(user);
     const first = await json(await exchange(code));
     const proposal = await insertProposal(user, grantId);
+    await sql(`update public.agent_oauth_codes set used_at = now() - interval '121 seconds' where hash = $1`, [sha(code)]);
 
     const replay = await exchange(code);
     expect(replay.status).toBe(400);
@@ -224,13 +226,62 @@ describe('authorization_code', () => {
     expect(mail.sent).toHaveLength(0);
   });
 
-  it('lets exactly one of many parallel exchanges win', async () => {
+  it('a retried exchange within 120 s returns the same pair and the new connection stays live', async () => {
+    const user = await createUser('retry');
+    const { code, grantId } = await approved(user);
+    const first = await json(await exchange(code));
+    const second = await exchange(code);
+    expect(second.status).toBe(200);
+    expect(await json(second)).toEqual(first);
+    expect(await grantRow(grantId)).toMatchObject({ revoked_at: null, oauth_status: 'live' });
+    expect(mail.sent).toHaveLength(0);
+    // and the pair works at /api/mcp
+    expect((await send(rpcBody('tools/list'), { token: first.access_token })).status).toBe(200);
+    const { data } = await db().from('agent_audit_log').select('outcome').eq('token_id', grantId).eq('tool', 'oauth').order('id');
+    expect(data!.map((r) => r.outcome)).toEqual(['exchange', 'exchange_replay']);
+  });
+
+  it('the first pair is derived from the code: the same code always means the same tokens', async () => {
+    const user = await createUser('derived');
+    const { code } = await approved(user);
+    const first = await json(await exchange(code));
+    const pair = deriveFirstPair(code, TEST_PEPPER);
+    expect(first.access_token).toBe(pair.access);
+    expect(first.refresh_token).toBe(pair.refresh);
+  });
+
+  it('a retry after the window, or after the first pair was used, revokes the grant (A12)', async () => {
+    const user = await createUser('lateretry');
+    const late = await approved(user);
+    await exchange(late.code);
+    await sql(`update public.agent_oauth_codes set used_at = now() - interval '121 seconds' where hash = $1`, [sha(late.code)]);
+    expect((await json(await exchange(late.code))).error).toBe('invalid_grant');
+    expect((await grantRow(late.grantId)).revoked_reason).toBe('code_replay');
+
+    const used = await approved(user);
+    const first = await json(await exchange(used.code));
+    expect((await send(rpcBody('tools/list'), { token: first.access_token })).status).toBe(200);
+    expect((await json(await exchange(used.code))).error).toBe('invalid_grant');
+    expect((await grantRow(used.grantId)).revoked_reason).toBe('code_replay');
+
+    const rotated = await approved(user);
+    const pair = await json(await exchange(rotated.code));
+    expect((await refresh(pair.refresh_token)).status).toBe(200);
+    expect((await json(await exchange(rotated.code))).error).toBe('invalid_grant');
+    expect((await grantRow(rotated.grantId)).revoked_reason).toBe('code_replay');
+  });
+
+  it('parallel exchanges of one code all get the same pair, and the grant stays live', async () => {
     const user = await createUser('parallel');
     const { code, grantId } = await approved(user);
     const results = await Promise.all(Array.from({ length: 6 }, () => exchange(code)));
-    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
-    expect(results.filter((r) => r.status === 400)).toHaveLength(5);
-    expect((await grantRow(grantId)).revoked_at).not.toBeNull();
+    expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200, 200, 200]);
+    const bodies = await Promise.all(results.map(json));
+    expect(new Set(bodies.map((b) => b.access_token)).size).toBe(1);
+    expect(new Set(bodies.map((b) => b.refresh_token)).size).toBe(1);
+    expect(await grantRow(grantId)).toMatchObject({ revoked_at: null, oauth_status: 'live' });
+    expect(await oauthTokens(grantId)).toHaveLength(2);
+    expect(mail.sent).toHaveLength(0);
   });
 });
 

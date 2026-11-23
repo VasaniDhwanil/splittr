@@ -3,10 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import { hmacEmailCode } from '@/lib/agent-tokens';
 import { callMint } from './helpers/agent';
 import { insertProposal, insertToken, seedPending, billExists } from './helpers/agent';
+import { generateOAuthTokenPair } from '@/lib/oauth/tokens';
 import { createUser, db, sql } from './helpers/db';
 import {
   CLAUDE_CODE_CLIENT_ID,
   HOSTED_CLIENT_ID,
+  TEST_PEPPER,
   callApprove,
   callRedeem,
   callRefresh,
@@ -234,6 +236,8 @@ describe('oauth_redeem_code', () => {
     const { result: approved, code } = await callApprove(user, await seedRequest(user));
     const first = await callRedeem(code);
     expect(first.result.status).toBe('ok');
+    // A retry inside 120 s is idempotent (below); after that the same call is a replay
+    await sql(`update public.agent_oauth_codes set used_at = now() - interval '121 seconds' where hash = $1`, [sha(code)]);
     const replay = await callRedeem(code, true);
     expect(replay.result).toMatchObject({ status: 'replayed', grant_id: approved.grant_id });
     expect(await grantRow(approved.grant_id!)).toMatchObject({ revoked_reason: 'code_replay' });
@@ -251,16 +255,63 @@ describe('oauth_redeem_code', () => {
     expect(await oauthTokens(approved.grant_id!)).toHaveLength(2);
   });
 
-  it('lets exactly one of many parallel redemptions win', async () => {
+  it('answers a retry within 120 s with the same pair and leaves the grant live (idempotent)', async () => {
+    const user = await createUser('retry');
+    const { result: approved, code } = await callApprove(user, await seedRequest(user));
+    const first = await callRedeem(code);
+    const again = await callRedeem(code);
+    expect(again.pair).toEqual(first.pair);
+    expect(again.result).toMatchObject({ status: 'ok', replay: true, grant_id: approved.grant_id, scopes: ['read'] });
+    expect(await grantRow(approved.grant_id!)).toMatchObject({ revoked_at: null, oauth_status: 'live' });
+    expect((await oauthTokens(approved.grant_id!)).map((t) => t.hash).sort()).toEqual([sha(first.pair.access), sha(first.pair.refresh)].sort());
+  });
+
+  it('ties the first pair to its code: parent_hash is the code hash', async () => {
+    const user = await createUser('parent');
+    const { result: approved, code } = await callApprove(user, await seedRequest(user));
+    await callRedeem(code);
+    expect((await oauthTokens(approved.grant_id!)).map((t) => t.parent_hash)).toEqual([sha(code), sha(code)]);
+  });
+
+  it('revokes on a retry after the first pair was used: refreshed, or used at /api/mcp', async () => {
+    for (const how of ['refreshed', 'called'] as const) {
+      const user = await createUser(`used-${how}`);
+      const { result: approved, code } = await callApprove(user, await seedRequest(user));
+      const first = await callRedeem(code);
+      if (how === 'refreshed') expect((await callRefresh(first.pair.refresh)).result.status).toBe('ok');
+      else await sql(`update public.agent_tokens set last_used_at = now() where id = $1`, [approved.grant_id]);
+      const retry = await callRedeem(code);
+      expect(retry.result.status, how).toBe('replayed');
+      expect(await grantRow(approved.grant_id!), how).toMatchObject({ revoked_reason: 'code_replay' });
+    }
+  });
+
+  it('revokes on a retry that comes back with a different pair (it was not derived from this code)', async () => {
+    const user = await createUser('otherpair');
+    const { result: approved, code } = await callApprove(user, await seedRequest(user));
+    await callRedeem(code);
+    const retry = await callRedeem(code, true, generateOAuthTokenPair(TEST_PEPPER));
+    expect(retry.result.status).toBe('replayed');
+    expect((await grantRow(approved.grant_id!)).revoked_reason).toBe('code_replay');
+  });
+
+  it('a retry whose bindings fail never revokes, even inside the window', async () => {
+    const user = await createUser('retrywrong');
+    const { result: approved, code } = await callApprove(user, await seedRequest(user));
+    await callRedeem(code);
+    expect((await callRedeem(code, false)).result.status).toBe('invalid');
+    expect((await grantRow(approved.grant_id!)).revoked_at).toBeNull();
+  });
+
+  it('parallel redemptions all get the same pair, and the grant stays live', async () => {
     const user = await createUser('race');
     const { result: approved, code } = await callApprove(user, await seedRequest(user));
     const results = await Promise.all(Array.from({ length: 6 }, () => callRedeem(code)));
-    const statuses = results.map((r) => r.result.status);
-    expect(statuses.filter((s) => s === 'ok')).toHaveLength(1);
-    expect(statuses.every((s) => ['ok', 'replayed', 'not_found'].includes(s))).toBe(true);
-    // a replay passed the checks, so the grant is gone with its tokens
-    expect(await grantRow(approved.grant_id!)).toMatchObject({ revoked_reason: 'code_replay' });
-    expect(await oauthTokens(approved.grant_id!)).toHaveLength(0);
+    expect(results.every((r) => r.result.status === 'ok')).toBe(true);
+    expect(results.filter((r) => r.result.replay === false)).toHaveLength(1);
+    expect(new Set(results.map((r) => r.pair.access)).size).toBe(1);
+    expect(await grantRow(approved.grant_id!)).toMatchObject({ revoked_at: null, oauth_status: 'live' });
+    expect(await oauthTokens(approved.grant_id!)).toHaveLength(2);
   });
 
   it('keeps the proposals of a replaced grant, deletes none', async () => {

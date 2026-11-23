@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  deriveFirstPair,
   deriveSuccessors,
   generateAuthorizationCode,
   generateOAuthTokenPair,
@@ -114,6 +115,33 @@ describe('derived successors', () => {
     const next = deriveSuccessors(a.refresh, PEPPER);
     expect(next.refresh).not.toBe(a.refresh);
     expect(parseOAuthToken(next.refresh, PEPPER)).toBe('refresh');
+  });
+});
+
+describe('the first pair, derived from the code', () => {
+  const code = generateAuthorizationCode();
+
+  it('is deterministic, valid, and of the right types', () => {
+    const a = deriveFirstPair(code, PEPPER);
+    expect(a).toEqual(deriveFirstPair(code, PEPPER));
+    expect(parseOAuthToken(a.access, PEPPER)).toBe('access');
+    expect(parseOAuthToken(a.refresh, PEPPER)).toBe('refresh');
+  });
+
+  it('differs per code, per pepper, and from every derived successor', () => {
+    const a = deriveFirstPair(code, PEPPER);
+    expect(deriveFirstPair(generateAuthorizationCode(), PEPPER).access).not.toBe(a.access);
+    expect(deriveFirstPair(code, OTHER).access).not.toBe(a.access);
+    // "at0|" is not "at|": the same string used as a refresh token yields something else
+    expect(deriveSuccessors(code, PEPPER).access).not.toBe(a.access);
+    expect(deriveSuccessors(code, PEPPER).refresh).not.toBe(a.refresh);
+    expect(a.access.slice(8)).not.toBe(a.refresh.slice(8));
+  });
+
+  it('does not contain the code', () => {
+    const a = deriveFirstPair(code, PEPPER);
+    expect(a.access).not.toContain(code);
+    expect(a.refresh).not.toContain(code);
   });
 });
 

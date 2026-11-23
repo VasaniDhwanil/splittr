@@ -11,9 +11,10 @@
  * MAC input, so swapping spl_oat_ for spl_ort_ breaks the check.) Only the
  * SHA-256 of the full string, prefix included, is ever stored.
  *
- * The first pair issued at code exchange is random. Every later pair is
- * derived from the refresh token being used, so a retried refresh can return
- * the same pair without the server holding any plaintext.
+ * Every pair is derived, never random: the first from the authorization code
+ * being redeemed, each later one from the refresh token being used. A retried
+ * code exchange or refresh can then return the same pair without the server
+ * holding any plaintext.
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { agentPepper } from '@/lib/agent-tokens';
@@ -58,10 +59,21 @@ export interface OAuthTokenPair {
   refresh: string;
 }
 
-/** The first pair of a grant, issued at code exchange: random. */
+/** Random pair. Only tests and tools use it: the server derives every pair it issues. */
 export function generateOAuthTokenPair(pepper: string | null = agentPepper()): OAuthTokenPair {
   const key = derivationKey(pepper);
   return { access: format(key, 'access', randomBytes(32)), refresh: format(key, 'refresh', randomBytes(32)) };
+}
+
+/**
+ * The first pair of a grant, from the authorization code: HMAC(k, "at0|" +
+ * code) and HMAC(k, "rt0|" + code). The "0" keeps it apart from successors.
+ * A retried exchange of the same code recomputes the same pair.
+ */
+export function deriveFirstPair(code: string, pepper: string | null = agentPepper()): OAuthTokenPair {
+  const key = derivationKey(pepper);
+  const body = (tag: 'at0' | 'rt0') => createHmac('sha256', key).update(`${tag}|${code}`).digest();
+  return { access: format(key, 'access', body('at0')), refresh: format(key, 'refresh', body('rt0')) };
 }
 
 /**

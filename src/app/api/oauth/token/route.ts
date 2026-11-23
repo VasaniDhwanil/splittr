@@ -11,7 +11,7 @@ import { overFailureLimit, recordFailure } from '@/lib/oauth/throttle';
 import {
   PKCE_VERIFIER_RE,
   deriveSuccessors,
-  generateOAuthTokenPair,
+  deriveFirstPair,
   hashOAuthSecret,
   isWellFormedAuthorizationCode,
   parseOAuthToken,
@@ -120,7 +120,8 @@ export async function POST(request: NextRequest) {
       const verifierOk = verifyPkceS256(verifier, row.code_challenge);
       const bindingsOk = clientOk && redirectOk && verifierOk;
 
-      const pair = generateOAuthTokenPair();
+      // Derived from the code, so a retried exchange (a lost response) gets the same pair
+      const pair = deriveFirstPair(code);
       const { data, error: rpcError } = await db.rpc('oauth_redeem_code', {
         p_code_hash: codeHash,
         p_bindings_ok: bindingsOk,
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
 
       switch (data.status) {
         case 'ok':
-          await auditAgentCall({ tokenId: data.grant_id, userId: data.user_id, tool: 'oauth', outcome: 'exchange', ip });
+          await auditAgentCall({ tokenId: data.grant_id, userId: data.user_id, tool: 'oauth', outcome: data.replay ? 'exchange_replay' : 'exchange', ip });
           return tokenResponse(pair, data.scopes as string[]);
         case 'replayed':
           await afterGrantRevoked({

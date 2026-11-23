@@ -118,8 +118,8 @@ CREATE TABLE IF NOT EXISTS public.agent_oauth_tokens (
   hash TEXT PRIMARY KEY,
   type TEXT NOT NULL CHECK (type IN ('access', 'refresh')),
   grant_id UUID NOT NULL REFERENCES public.agent_tokens(id) ON DELETE CASCADE,
-  -- For tokens derived from a refresh token: that refresh token's hash. NULL
-  -- for the first pair of a grant.
+  -- For tokens derived from a refresh token: that refresh token's hash. For the
+  -- first pair of a grant: the hash of the code it was derived from.
   parent_hash TEXT,
   expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   -- Refresh tokens only: when this one was exchanged for its successor
@@ -416,7 +416,10 @@ GRANT EXECUTE ON FUNCTION public.oauth_approve_request(TEXT, UUID, TEXT, TEXT[],
 -- and the PKCE verifier, in constant time, and says so in p_bindings_ok).
 --
 --   * single use: a second use fails; if it passes the bindings it is a
---     replay and revokes the grant the code created (RFC 9700)
+--     replay and revokes the grant the code created (RFC 9700), EXCEPT a
+--     retry within 120 s whose token hashes are the first pair's (the pair is
+--     derived from the code, so a retry computes the same one) while that
+--     pair is unused: it is answered with the same pair, the grant stays live
 --   * makes the grant live (90 days), revokes the grants replaced at consent
 --     (their proposals are kept), issues the first token pair
 --
@@ -465,6 +468,24 @@ BEGIN
 
   IF c.used_at IS NOT NULL THEN
     IF p_bindings_ok THEN
+      -- A retry of a response Claude never received: same code, same pair, first pair still unused
+      IF g.revoked_at IS NULL AND g.kind = 'oauth' AND g.oauth_status = 'live'
+         AND c.used_at > NOW() - INTERVAL '120 seconds'
+         AND g.last_used_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM public.agent_oauth_tokens
+           WHERE hash = p_access_hash AND type = 'access' AND grant_id = g.id AND parent_hash = c.hash
+         )
+         AND EXISTS (
+           SELECT 1 FROM public.agent_oauth_tokens
+           WHERE hash = p_refresh_hash AND type = 'refresh' AND grant_id = g.id AND parent_hash = c.hash
+             AND rotated_at IS NULL
+         ) THEN
+        RETURN jsonb_build_object(
+          'status', 'ok', 'replay', true, 'grant_id', g.id, 'user_id', g.user_id,
+          'scopes', to_jsonb(g.scopes), 'replaced', 0
+        );
+      END IF;
       IF g.revoked_at IS NULL THEN
         UPDATE public.agent_tokens SET revoked_at = NOW(), revoked_reason = 'code_replay' WHERE id = g.id;
       END IF;
@@ -511,13 +532,15 @@ BEGIN
     WHERE id = ANY (replace_live) AND revoked_at IS NULL;
   END IF;
 
-  INSERT INTO public.agent_oauth_tokens (hash, type, grant_id, expires_at)
+  -- parent_hash is the code's hash: it ties the first pair to its code (see the retry above)
+  INSERT INTO public.agent_oauth_tokens (hash, type, grant_id, parent_hash, expires_at)
   VALUES
-    (p_access_hash, 'access', g.id, NOW() + INTERVAL '1 hour'),
-    (p_refresh_hash, 'refresh', g.id, grant_expiry);
+    (p_access_hash, 'access', g.id, c.hash, NOW() + INTERVAL '1 hour'),
+    (p_refresh_hash, 'refresh', g.id, c.hash, grant_expiry);
 
   RETURN jsonb_build_object(
     'status', 'ok',
+    'replay', false,
     'grant_id', g.id,
     'user_id', g.user_id,
     'scopes', to_jsonb(g.scopes),
