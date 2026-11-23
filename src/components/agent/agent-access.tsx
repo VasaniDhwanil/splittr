@@ -363,7 +363,7 @@ export function AgentAccess({ index = 4 }: { index?: number }) {
         open={revokeAllOpen}
         onOpenChange={(open) => !pending && setRevokeAllOpen(open)}
         title="Revoke all and sign out everywhere?"
-        description="Every agent token stops working. This account is also signed out on every device, including this one, and you will go to the sign-in page."
+        description="Every Claude connection and agent token stops working. This account is also signed out on every device, including this one, and you will go to the sign-in page."
         confirmLabel="Revoke all and sign out"
         onConfirm={() => void revokeAll()}
         isPending={pending}

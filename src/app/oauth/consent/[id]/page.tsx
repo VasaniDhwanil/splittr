@@ -349,7 +349,7 @@ export default function ConsentPage() {
               <CheckRow
                 checked={proposeBills}
                 onChange={setProposeBills}
-                label={SCOPE_LABELS['bills:write']}
+                label="Propose new bills (each one waits for your approval on Splittr)"
                 helper="It can draft a bill for you. Nobody else sees a draft until you approve it on Splittr."
               />
             </div>

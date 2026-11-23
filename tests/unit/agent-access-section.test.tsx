@@ -123,4 +123,38 @@ describe('AgentAccess section', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke all and sign out' })).not.toBeDisabled());
     expect(push).not.toHaveBeenCalled();
   });
+
+  it('shows OAuth connections as connections, with the Connect Claude explainer and personal tokens as the secondary option', async () => {
+    const oauth = [
+      { ...base, id: 'o1', name: 'Claude', kind: 'oauth', destination: 'claude.ai', last4: null, status: 'active', scopes: ['read', 'bills:write'], last_used_at: '2026-01-02T00:00:00Z' },
+      { ...base, id: 'o2', name: 'Claude Code', kind: 'oauth', destination: 'loopback', last4: null, status: 'suspended', suspended_reason: 'Three bills declined in an hour' },
+      { ...base, id: 'o3', name: 'Claude', kind: 'oauth', destination: 'claude.ai', last4: null, status: 'revoked', revoked_reason: 'user' },
+    ];
+    const fx = mockFetch({
+      'GET /api/agent-tokens': { body: { enabled: true, mcp_url: 'https://www.splittr.cash/api/mcp', tokens: [...oauth, TOKENS[0]] } },
+      'POST /api/agent-tokens/o2/resume': { body: { ok: true } },
+      'DELETE /api/agent-tokens/o1': { body: { ok: true } },
+    });
+    render(<AgentAccess />);
+    expect(await screen.findByText('Claude (claude.ai)')).toBeInTheDocument();
+    expect(screen.getByText('Claude Code on a computer')).toBeInTheDocument();
+    const list = screen.getByRole('list', { name: 'Your Claude connections' });
+    expect(within(list).getAllByText('Connected')).toHaveLength(3);
+    expect(within(list).queryByText(/\.\.\./)).toBeNull(); // no last4 for connections
+    expect(within(list).getByText('Paused: Three bills declined in an hour')).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Your agent tokens' })).toHaveTextContent('Active one');
+    // The explainer
+    expect(screen.getByText('Connect Claude')).toBeInTheDocument();
+    expect(screen.getByText('claude mcp add --transport http splittr https://www.splittr.cash/api/mcp')).toBeInTheDocument();
+    expect(screen.getByText(/Add custom connector/)).toBeInTheDocument();
+    expect(screen.getByText(/with www, and nothing after/)).toBeInTheDocument();
+    expect(screen.getByText(/For other apps, or if you prefer not to sign in/)).toBeInTheDocument();
+    // Turn back on a paused connection
+    fireEvent.click(within(list).getByRole('button', { name: 'Turn back on' }));
+    await waitFor(() => expect(fx.calls.some((c) => c.key === 'POST /api/agent-tokens/o2/resume')).toBe(true));
+    // Revoke asks first
+    fireEvent.click(within(list).getByRole('button', { name: 'Revoke Claude (claude.ai)' }));
+    expect(await screen.findByText('Revoke this connection?')).toBeInTheDocument();
+    expect(fx.calls.some((c) => c.key === 'DELETE /api/agent-tokens/o1')).toBe(false);
+  });
 });
