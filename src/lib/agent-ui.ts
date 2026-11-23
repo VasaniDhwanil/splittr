@@ -16,7 +16,12 @@ export type TokenStatus = 'active' | 'suspended' | 'expired' | 'revoked';
 export interface TokenRow {
   id: string;
   name: string;
-  last4: string;
+  /** Older servers omit it: everything is then a personal token. */
+  kind?: 'pat' | 'oauth';
+  /** OAuth rows only: where the connection's answer goes. */
+  destination?: 'claude.ai' | 'loopback' | null;
+  /** Null for OAuth rows. */
+  last4: string | null;
   scopes: AgentScope[];
   created_at: string;
   expires_at: string;

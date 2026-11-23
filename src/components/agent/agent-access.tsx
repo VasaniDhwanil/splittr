@@ -14,6 +14,7 @@ import {
   revokedReasonText,
   type TokenRow,
 } from '@/lib/agent-ui';
+import { connectionTitle } from '@/lib/oauth-ui';
 import { CopyButton } from './copy-button';
 import { CreateTokenDialog } from './create-token-dialog';
 
@@ -21,6 +22,8 @@ interface TokenList {
   mcpUrl: string;
   tokens: TokenRow[];
 }
+
+const labelOf = (t: TokenRow) => (t.kind === 'oauth' ? connectionTitle(t.destination) : t.name);
 
 /** One line of state: a dot and a plain word. Only an active token is green. */
 function TokenState({ token }: { token: TokenRow }) {
@@ -56,18 +59,22 @@ function TokenItem({
   resuming: boolean;
 }) {
   const dead = token.status === 'expired' || token.status === 'revoked';
+  const oauth = token.kind === 'oauth';
+  const title = oauth ? connectionTitle(token.destination) : token.name;
   return (
     <li className={`px-4 py-4 ${dead ? 'opacity-60' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="break-words font-medium text-white">{token.name}</p>
+          <p className="break-words font-medium text-white">{title}</p>
           <p className="mt-0.5 text-xs text-white/45">
             <TokenState token={token} />
           </p>
         </div>
-        <span className="font-mono shrink-0 text-xs text-white/35" aria-label={`Ends in ${token.last4}`}>
-          ...{token.last4}
-        </span>
+        {!oauth && token.last4 && (
+          <span className="font-mono shrink-0 text-xs text-white/35" aria-label={`Ends in ${token.last4}`}>
+            ...{token.last4}
+          </span>
+        )}
       </div>
 
       <ul className="mt-2 space-y-0.5 text-sm text-white/60">
@@ -77,7 +84,7 @@ function TokenItem({
       </ul>
 
       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-5 gap-y-1 text-xs">
-        <dt className="text-white/35">Created</dt>
+        <dt className="text-white/35">{oauth ? 'Connected' : 'Created'}</dt>
         <dd className="text-white/60">{formatDay(token.created_at)}</dd>
         <dt className="text-white/35">{token.status === 'expired' ? 'Expired' : 'Expires'}</dt>
         <dd className="text-white/60">{formatDay(token.expires_at)}</dd>
@@ -102,7 +109,7 @@ function TokenItem({
             size="sm"
             className={`text-white/60 hover:bg-white/[0.06] hover:text-white ${token.status === 'active' ? '-ml-3.5' : ''}`}
             onClick={onRevoke}
-            aria-label={`Revoke ${token.name}`}
+            aria-label={`Revoke ${title}`}
           >
             Revoke
           </Button>
@@ -158,11 +165,11 @@ export function AgentAccess({ index = 4 }: { index?: number }) {
     try {
       const { res } = await post(`/api/agent-tokens/${revoking.id}`, 'DELETE');
       if (!res.ok) throw new Error();
-      toast.success(`${revoking.name} no longer works`);
+      toast.success(`${labelOf(revoking)} no longer works`);
       setRevoking(null);
       await load();
     } catch {
-      toast.error('Could not revoke that token. Please try again.');
+      toast.error('Could not revoke that. Please try again.');
     } finally {
       setPending(false);
     }
@@ -173,10 +180,10 @@ export function AgentAccess({ index = 4 }: { index?: number }) {
     try {
       const { res } = await post(`/api/agent-tokens/${token.id}/resume`);
       if (!res.ok) throw new Error();
-      toast.success(`${token.name} is back on`);
+      toast.success(`${labelOf(token)} is back on`);
       await load();
     } catch {
-      toast.error('Could not turn that token back on. Please try again.');
+      toast.error('Could not turn that back on. Please try again.');
     } finally {
       setResumingId(null);
     }
@@ -202,59 +209,114 @@ export function AgentAccess({ index = 4 }: { index?: number }) {
   };
 
   const hasLive = data.tokens.some((t) => t.status === 'active' || t.status === 'suspended');
+  const connections = data.tokens.filter((t) => t.kind === 'oauth');
+  const personal = data.tokens.filter((t) => t.kind !== 'oauth');
+  const claudeCodeCommand = `claude mcp add --transport http splittr ${data.mcpUrl}`;
+
+  const renderList = (rows: TokenRow[], label: string) => (
+    <ul className="surface divide-y divide-white/[0.06] overflow-hidden rounded-2xl" aria-label={label}>
+      {rows.map((t) => (
+        <TokenItem
+          key={t.id}
+          token={t}
+          onRevoke={() => setRevoking(t)}
+          onResume={() => void resume(t)}
+          resuming={resumingId === t.id}
+        />
+      ))}
+    </ul>
+  );
 
   return (
     <>
       <Section
         index={index}
         title="Agent access"
-        description="Let your own AI agent, such as Claude Code or Cursor, look at your bills and balances. It can also draft a bill for you, but a draft stays invisible until you approve it here on Splittr."
-        action={
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setCreateOpen(true)}
-            className="text-white/60 hover:bg-white/[0.06] hover:text-white"
-          >
-            <Plus />
-            New token
-          </Button>
-        }
+        description="Let Claude, or another AI agent, look at your bills and balances. It can also draft a bill for you, but a draft stays invisible until you approve it here on Splittr."
       >
-        <div className="space-y-6">
+        <div className="space-y-8">
           {data.mcpUrl && (
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-white/70">Address your agent connects to</p>
-              <div className="surface flex items-center gap-3 rounded-2xl py-2 pr-2 pl-4">
-                <code className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-white/80">
-                  {data.mcpUrl}
-                </code>
-                <CopyButton value={data.mcpUrl} label="Copy" ariaLabel="Copy address" />
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-white/70">Connect Claude</h3>
+              <div className="surface space-y-5 rounded-2xl p-4">
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-white/40">Splittr&apos;s address</p>
+                  <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] py-2 pr-2 pl-4">
+                    <code className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-white/80">
+                      {data.mcpUrl}
+                    </code>
+                    <CopyButton value={data.mcpUrl} label="Copy" ariaLabel="Copy address" />
+                  </div>
+                  <p className="text-xs leading-relaxed text-white/40">
+                    Type it exactly as shown: with <span className="font-mono">www</span>, and nothing after{' '}
+                    <span className="font-mono">/api/mcp</span>. Leaving out <span className="font-mono">www</span> or
+                    adding a <span className="font-mono">/</span> at the end will not connect.
+                  </p>
+                </div>
+
+                <div className="space-y-2 border-t border-white/[0.06] pt-5">
+                  <p className="text-sm font-medium text-white">In Claude on the web, the Desktop app or your phone</p>
+                  <ol className="list-decimal space-y-1 pl-5 text-sm leading-relaxed text-white/60 marker:text-white/30">
+                    <li>
+                      On claude.ai or in the Desktop app, open Customize, then Connectors.
+                    </li>
+                    <li>Choose Add, then Add custom connector.</li>
+                    <li>Give it a name, such as Splittr, and paste the address above.</li>
+                    <li>Sign in to Splittr when Claude asks. Once it is added, it is there on your phone too.</li>
+                  </ol>
+                </div>
+
+                <div className="space-y-2 border-t border-white/[0.06] pt-5">
+                  <p className="text-sm font-medium text-white">In Claude Code</p>
+                  <ol className="list-decimal space-y-1 pl-5 text-sm leading-relaxed text-white/60 marker:text-white/30">
+                    <li>Run this command in your terminal.</li>
+                    <li>In Claude Code, run /mcp, pick Splittr, and follow the steps in your browser to sign in.</li>
+                  </ol>
+                  <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] py-2 pr-2 pl-4">
+                    <code className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-white/80">
+                      {claudeCodeCommand}
+                    </code>
+                    <CopyButton value={claudeCodeCommand} label="Copy" ariaLabel="Copy command" />
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-white/35">
-                Your agent also needs a token. Make one below; it is a password only that agent uses.
-              </p>
             </div>
           )}
 
-          {data.tokens.length > 0 ? (
-            <ul className="surface divide-y divide-white/[0.06] overflow-hidden rounded-2xl" aria-label="Your agent tokens">
-              {data.tokens.map((t) => (
-                <TokenItem
-                  key={t.id}
-                  token={t}
-                  onRevoke={() => setRevoking(t)}
-                  onResume={() => void resume(t)}
-                  resuming={resumingId === t.id}
-                />
-              ))}
-            </ul>
-          ) : (
-            <p className="surface rounded-2xl px-4 py-5 text-sm text-white/45">
-              No tokens yet. Make one when you are ready to connect an agent.
-            </p>
+          {connections.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-white/70">Connections</h3>
+              {renderList(connections, 'Your Claude connections')}
+            </div>
           )}
+
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h3 className="text-sm font-medium text-white/70">Personal tokens</h3>
+                <p className="mt-0.5 text-xs leading-relaxed text-white/40">
+                  For other apps, or if you prefer not to sign in. A token is a password only one agent uses.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setCreateOpen(true)}
+                className="-mr-2 shrink-0 text-white/60 hover:bg-white/[0.06] hover:text-white"
+              >
+                <Plus />
+                New token
+              </Button>
+            </div>
+            {personal.length > 0 ? (
+              renderList(personal, 'Your agent tokens')
+            ) : (
+              <p className="surface rounded-2xl px-4 py-5 text-sm text-white/45">
+                No tokens yet. Make one when you are ready to connect an agent.
+              </p>
+            )}
+          </div>
 
           {hasLive && (
             <div className="space-y-1">
@@ -267,7 +329,7 @@ export function AgentAccess({ index = 4 }: { index?: number }) {
                 Revoke all and sign out everywhere
               </Button>
               <p className="text-xs text-white/35">
-                Use this if you think someone else has your account or a token.
+                Use this if you think someone else has your account, a connection or a token.
               </p>
             </div>
           )}
@@ -284,10 +346,12 @@ export function AgentAccess({ index = 4 }: { index?: number }) {
       <ConfirmDialog
         open={revoking !== null}
         onOpenChange={(open) => !open && !pending && setRevoking(null)}
-        title="Revoke this token?"
+        title={revoking?.kind === 'oauth' ? 'Revoke this connection?' : 'Revoke this token?'}
         description={
           revoking
-            ? `${revoking.name} stops working right away. Any agent using it will lose access. This cannot be undone; you would make a new token.`
+            ? revoking.kind === 'oauth'
+              ? `${labelOf(revoking)} stops working right away. To use it again, connect again from Claude. This cannot be undone.`
+              : `${revoking.name} stops working right away. Any agent using it will lose access. This cannot be undone; you would make a new token.`
             : undefined
         }
         confirmLabel="Revoke"
