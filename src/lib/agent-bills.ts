@@ -56,6 +56,21 @@ export async function deleteUnapprovedProposals(tokenIds: string[]): Promise<voi
   if (error) throw new Error('proposal cleanup failed');
 }
 
+/**
+ * A connection that a newer one replaced keeps its proposals (replacement is
+ * not distrust). When the owner then revokes everything because they distrust
+ * their connections ("revoke all", the "Not you?" link), those go too.
+ */
+export async function deleteReplacedGrantProposals(userId: string): Promise<void> {
+  const { data, error } = await createAdminClient()
+    .from('agent_tokens')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('revoked_reason', 'replaced');
+  if (error) throw new Error('replaced grant read failed');
+  await deleteUnapprovedProposals((data ?? []).map((row) => row.id));
+}
+
 /** True when the proposal's token row is revoked: such a proposal is not approvable and looks missing. A deleted token row (pruned after expiry) is not a revocation. */
 export async function proposalTokenRevoked(agentTokenId: string | null): Promise<boolean> {
   if (!agentTokenId) return false;

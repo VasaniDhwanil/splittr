@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { hashAgentToken } from '@/lib/agent-tokens';
 import { guardAgentOrigin, notFound } from '@/lib/agent-access';
-import { deleteUnapprovedProposals } from '@/lib/agent-bills';
+import { deleteReplacedGrantProposals, deleteUnapprovedProposals } from '@/lib/agent-bills';
 
 const SECRET = /^[A-Za-z0-9_-]{43}$/;
 const LINK_LIFETIME_MS = 30 * 86_400_000;
@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
     await deleteUnapprovedProposals((data ?? []).map((row) => row.id));
+    await deleteReplacedGrantProposals(owner.user_id);
     return NextResponse.json({ revoked: data?.length ?? 0 });
   } catch (error) {
     console.error('Error in agent-tokens revoke-link:', error instanceof Error ? error.message : 'unknown');

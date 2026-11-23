@@ -263,3 +263,45 @@ describe('GET /api/agent-tokens lists both kinds', () => {
     expect(ok.status).toBe(200);
   });
 });
+
+describe('proposals of a replaced grant', () => {
+  /** An old hosted grant with one pending and one approved proposal, replaced by a newer connection. */
+  async function replaced() {
+    const old = await connect(user, { clientId: HOSTED_CLIENT_ID });
+    const pending = await insertProposal(user, old.grantId);
+    const approved = await insertProposal(user, old.grantId, { approved: true });
+    const fresh = await connect(user, { clientId: HOSTED_CLIENT_ID, replace: true });
+    expect((await grantRow(old.grantId)).revoked_reason).toBe('replaced');
+    // replacement alone is not distrust: the pending proposal is kept
+    expect(await billExists(pending)).toBe(true);
+    return { old, fresh, pending, approved };
+  }
+
+  it('revoke-all deletes them too, and keeps approved bills', async () => {
+    const { pending, approved } = await replaced();
+    signInAs(user);
+    expect((await revokeAll(request('POST', '/api/agent-tokens/revoke-all', { headers: ORIGIN }))).status).toBe(200);
+    expect(await billExists(pending)).toBe(false);
+    expect(await billExists(approved)).toBe(true);
+  });
+
+  it('the "Not you?" link deletes them too', async () => {
+    const { fresh, pending, approved } = await replaced();
+    const secret = randomBytes(32).toString('base64url');
+    await db().from('agent_tokens').update({ revoke_link_hash: hashAgentToken(secret) }).eq('id', fresh.grantId);
+    expect((await revokeLink(request('POST', '/api/agent-tokens/revoke-link', { body: { secret }, headers: ORIGIN }))).status).toBe(200);
+    expect(await billExists(pending)).toBe(false);
+    expect(await billExists(approved)).toBe(true);
+  });
+
+  it("never touches another account's replaced grants", async () => {
+    const other = await createUser('neighbour');
+    const theirs = await connect(other, { clientId: HOSTED_CLIENT_ID });
+    const theirProposal = await insertProposal(other, theirs.grantId);
+    await connect(other, { clientId: HOSTED_CLIENT_ID, replace: true });
+    await replaced();
+    signInAs(user);
+    await revokeAll(request('POST', '/api/agent-tokens/revoke-all', { headers: ORIGIN }));
+    expect(await billExists(theirProposal)).toBe(true);
+  });
+});
