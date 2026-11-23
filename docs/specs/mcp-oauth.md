@@ -1198,8 +1198,8 @@ option (WP9). Numbered for reference.
 2. **Binding cookie name on http.** `__Host-splittr-oauth` with Secure on an
    https issuer. A `__Host-` cookie cannot exist without Secure, so on an http
    issuer (only ever `http://localhost`, A9) the cookie is `splittr-oauth`
-   without Secure. One helper (`bindingCookieName`) decides. One cookie name
-   means two simultaneous connections in one browser overwrite each other.
+   without Secure. One helper (`bindingCookieName`) decides. (WP10 made the name per
+   request: see 22.)
 3. **`amr` method names (A16), measured on the local stack.**
    `verifyOtp({ token_hash })` (types `email` and `magiclink`, new and
    existing accounts): `otp`. `verifyOtp` with the 6-digit code: `otp`.
@@ -1231,9 +1231,9 @@ option (WP9). Numbered for reference.
    grants "replace" means are the account's live grants for the same client at
    approval time, stored on the code; at redemption those still live are
    revoked with reason `replaced` and their proposals kept
-   (`proposalTokenRevoked` ignores that reason). Known gap: a later
-   revoke-all does not delete proposals of an already replaced grant (they
-   expire on their own).
+   (`proposalTokenRevoked` ignores that reason). (WP10 closed the gap
+   where a later revoke-all or "Not you?" link left the proposals of an already
+   replaced grant to expire on their own: see 25.)
 7. **Cap is checked twice.** At approval (live grants, minus those being
    replaced, at most 5) and again at redemption under the same lock, so
    several approvals made while below the cap cannot all go live. A
@@ -1277,10 +1277,74 @@ option (WP9). Numbered for reference.
     `revocation_endpoint_auth_methods_supported: ["none"]` (otherwise RFC 7009
     clients assume `client_secret_basic`). `.well-known` folders under `app/`
     route normally in Next 16 (see the build report); no rewrite is needed.
-16. **Pending and OAuth rows in the existing list.** `GET /api/agent-tokens`
-    does not yet filter or reshape OAuth rows (null `last4`, pending grants):
-    that is the profile work package. The PAT cap in the route counts
+16. **Pending and OAuth rows in the existing list.** (WP10 did this: see 24.)
+    The PAT cap in the route counts
     `kind = 'pat'` and falls back to counting all rows if the column is
     missing (before migration 019).
 17. **Revoke-link secret** for an OAuth grant is stored like a PAT's; the
     link in "Claude was connected" uses the issuer origin.
+
+Added by WP10 (`/api/mcp` accepts OAuth tokens; fixes from the WP9 report).
+
+18. **Dispatch on the bearer prefix, not on validity.** `spl_pat_` anything
+    (even malformed) takes the v1 path exactly, so personal-token failures
+    keep their v1 401 with no challenge and still feed the failed-auth limiter.
+    `spl_oat_` goes to `resolveOAuthAccessToken`. With OAuth on, every other
+    value (`spl_ort_`, garbage, a bad check suffix) is a 401 with the
+    challenge and `error="invalid_token"`, and costs no database call and no
+    limiter budget; a missing credential is a 401 with the challenge, also not
+    counted (A13). With OAuth off nothing changes for anything that is not
+    `spl_oat_`, including the v1 counting of a missing credential; `spl_oat_`
+    is 503 `oauth_disabled` with `Retry-After: 60` (A11).
+19. **claude.ai is an allowed Origin only while OAuth is on** (A10). With the
+    switch off the v1 rule holds exactly (the request's own origin and the
+    site's known origins).
+20. **Query-string leaks.** The scan now also finds `spl_oat_` / `spl_ort_`
+    values whose check suffix is valid (a forged lookalike costs no database
+    call), looks the token up in `agent_oauth_tokens`, and revokes its grant
+    with `revoked_reason = 'query_string'`, deletes its unapproved proposals
+    and emails the owner like for a personal token. Only personal tokens cost
+    failed-auth budget. The 401 for a leaked token carries no challenge (it is
+    not a credential presented in a header). The scan runs whether or not
+    OAuth is on (a lookup error before migration 019 is ignored).
+21. **The first token pair is derived from the code (amends A1 and 5).**
+    access = `spl_oat_` + HMAC(k, "at0|" + code), refresh = `spl_ort_` +
+    HMAC(k, "rt0|" + code), with the usual check suffix. `oauth_redeem_code`
+    stores them with `parent_hash` = the code's hash. A second exchange of the
+    same code that passes client, `redirect_uri` and PKCE is answered `ok`
+    with the same pair (the response carries `replay: true`, audited as
+    `exchange_replay`) when all of these hold: within 120 s of the first,
+    the grant is live, the hashes presented are the first pair's, the refresh
+    token has not been rotated, and the grant has never been used at
+    `/api/mcp` (`last_used_at` is null). Anything else with correct bindings
+    is the A12 replay: revoked. Parallel exchanges therefore all get one pair.
+22. **The binding cookie is per request (amends 2).**
+    `__Host-splittr-oauth-<request id>` on https, `splittr-oauth-<request id>`
+    on http localhost. The request id is part of the name, so each consent API
+    reads the one cookie for the id in its URL. The old shared name opens
+    nothing. Cookies are not cleared on approve or deny; they expire with the
+    request (10 minutes).
+23. **Defence in depth for the hosted client (5.c).**
+    `oauth_approve_request` returns `code_required` for
+    `p_require_code = false` when the request's `client_id` is the hosted
+    client, whatever the caller says. The id is hard-coded in the function, so
+    flipping `HOSTED_CLIENT_REQUIRES_EMAILED_CODE` after the post-deploy D3
+    test is no longer enough on its own: it also needs a migration that drops
+    that check. Test helpers give a hosted request a code by default.
+24. **The token list and resume.** Rows carry `kind` (`pat` default) and, for
+    OAuth rows only, `destination`; `last4` is `null` for OAuth rows. Rows with
+    `oauth_status = 'pending'` are filtered out (also when revoked or expired:
+    they were never connections). Status is computed by the same function for
+    both kinds. Resume adds `oauth_status is null or 'live'` to its update, so a
+    pending grant is 404. Both fall back to the old query when the column is
+    missing (42703, before migration 019).
+25. **Replaced grants and distrust.** `deleteReplacedGrantProposals(userId)`
+    (revoke-all and the "Not you?" link) deletes the unapproved proposals of
+    every grant of the account with `revoked_reason = 'replaced'`. Approved
+    bills are never touched, and the profile "revoke" of one other grant does
+    not do this (it is not a statement of distrust).
+26. **`scripts/oauth-e2e.mjs`** needs `E2E_SERVER_LOG` (the file `next dev`
+    writes to) for the hosted client's emailed code. It signs the browser in
+    with an admin-minted magic link (a fresh `otp` sign-in), so Claude Code
+    needs no code and the hosted client needs the code read from the log; it
+    creates and deletes one `oauth-e2e-*@example.test` user in the local database.
