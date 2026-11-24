@@ -553,7 +553,7 @@ describe('prune_agent_access', () => {
 });
 
 describe('prune_agent_access and the Not-you link (F8)', () => {
-  const pendingGrantAged = async (user: TestUser, age: string) => {
+  const pendingGrantAged = async (user: { id: string; email: string }, age: string) => {
     const { result } = await callApprove(user, await seedRequest(user));
     // created `age` ago, expired five minutes after that, like a code nobody redeemed
     await sql(
