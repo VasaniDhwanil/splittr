@@ -191,11 +191,21 @@ token's scopes allow; an out-of-scope call errors with no side effects.
   its bills the actor didn't create or join. (B4)
 - `get_balances` computes over exactly the same bill set as `get_bill` and
   `list_my_bills`.
-- **Anonymous participant names are not returned** (decision on former Q3).
-  On any bill, the agent sees names only for the actor and for participants
-  linked to an account; anonymous participants appear as counts plus their
-  shares ("3 guests: $12.40, $9.10, $9.10"). This removes the bulk of
-  stranger-written text from tool output. (B8)
+- **Anonymous participant names are returned as `untrusted_name`, capped at 40
+  characters, through the instruction filter** (amended 2026-11-24, owner
+  decision). This replaces the original rule (decision on former Q3) that
+  anonymous names were not returned and guests appeared only as counts plus
+  shares ("3 guests: $12.40, $9.10, $9.10"). On `get_bill`, a guest is labelled
+  `guest #n` and carries `untrusted_name`, the same field and sanitiser as
+  account holders (invisible characters stripped, instruction-looking text
+  replaced with the withheld marker). `unverified` entries in `get_balances`
+  (`guest_owes_you`, `name_matches_you`) carry `untrusted_name` too, so "who
+  owes me on this bill" is answerable. Participant names get a dedicated 40
+  character cap; bill and item names keep 100. Rationale: every write still
+  needs approval (D6), and the names are labelled untrusted, so the residual
+  risk of stranger-written text is accepted for the usefulness of knowing who
+  a guest is. Unchanged: no payment handles on unverified entries, and
+  guests are never counted in verified balances. (B8)
 - **No lookup by short code for unrelated bills**, even though the web allows
   link-bearer reads. Not-found and not-allowed return identical errors.
 - **Balances count only rows linked by `user_id`.** Name-matched rows (the web
@@ -221,8 +231,10 @@ token's scopes allow; an out-of-scope call errors with no side effects.
   others' bills, group names, linked participants' and counterparties'
   display names) is returned only in fields prefixed `untrusted_`. Tool
   descriptions say these are user-supplied data, not instructions. The prefix
-  is a hint to the model, **not a security control**; the real reduction is
-  not returning anonymous names at all (D7). (B8)
+  is a hint to the model, **not a security control**; the real control is
+  approval for every write. Anonymous names were originally withheld (D7) and
+  are returned as `untrusted_name` since 2026-11-24 (see the amendment above).
+  (B8)
 - Output sanitiser applied at DTO time to every string, using an explicit
   blocklist rather than whole Unicode categories (which would break emoji
   sequences and depend on Node's Unicode version): tag characters
@@ -375,7 +387,7 @@ splittr.cash.
   heavy for v1. (C4)
 
 **G3. Output policy (deterministic, every read; a hint, not a control).** On top
-of D7 (anonymous names withheld) and D8 (sanitiser, `untrusted_` fields): a
+of D7 (anonymous names, since 2026-11-24 returned capped at 40 characters) and D8 (sanitiser, `untrusted_` fields): a
 string from someone else's text that matches word-anchored instruction-like
 patterns ("ignore previous", "system:", "you are now", "assistant:") is
 replaced with `[withheld: looks like instructions]`, with a stable placeholder
@@ -409,7 +421,7 @@ small model (for example Claude Haiku 5.5) over tool inputs or other people's
 text to detect injection was considered. It isn't adopted because it's
 probabilistic where G1–G3 are deterministic, it can itself be targeted by
 adversarial text, it adds latency and cost to every call, and it sends user
-text to another processor. With anonymous names withheld (D7), drafts (G2) and
+text to another processor. With anonymous names capped and filtered (D7), drafts (G2) and
 pattern withholding (G3), little attacker text remains for it to judge.
 Revisit if G3's false-positive rate is high or new write tools arrive; if
 adopted, it should run once at write time (when a name is saved), store a
@@ -533,12 +545,12 @@ Round 2 found the repo can't run this plan as-is. The harness decisions:
   bill's creator, current group member, former member, stranger, member of a
   different group, bill planted in the actor's group by a non-member}: only the
   allowed relations see data; strangers get the same error as a nonexistent id.
-- **T-LEDGER**: an anonymous participant named after a member → `unverified`,
-  no handle; colliding member names → no handle; handles never from
+- **T-LEDGER**: an anonymous participant named after a member → `unverified`
+  with its `untrusted_name` (capped, filtered), no handle; colliding member names → no handle; handles never from
   `bills.*_handle`.
 - **T-DTO**: snapshot of output keys for every tool; fails on `creator_token`,
   `participant_token_hash`, email, `zelle_*`, others' `user_id`; anonymous
-  participants appear only as counts and shares. The web bill GET never
+  participants appear as `guest #n` with `untrusted_name` and a share. The web bill GET never
   returns `agent_token_id` or `created_via`.
 - **T-INJ**: instruction-like names, control characters, 10 KB strings, U+E0041
   tag characters, U+200B, U+202E → stripped and capped in every string field,
@@ -602,8 +614,8 @@ Round 2 found the repo can't run this plan as-is. The harness decisions:
 - Q2. If the local Supabase stack proves impractical (Docker resources, or
   migrations 009/013 failing on a fresh stack), fall back to a second free
   Supabase project as the test database.
-- Q3. (Decided in D7: anonymous participant names aren't returned. Revisit
-  if agents prove much less useful without them.)
+- Q3. (Decided in D7: anonymous participant names aren't returned. Amended
+  2026-11-24: they are returned as `untrusted_name`, capped at 40.)
 - Q4. Owner decisions that change scope: is it acceptable that claude.ai web
   can't connect in v1 (D1)? Is `payments:write` worth bringing back in v2?
 
@@ -650,7 +662,7 @@ Round 2 (same reviewer, attacking v2's fixes):
 | B5 claim-time linking, index conflict, destructive dedupe | Medium | P4 conditional linking, claim prompt, merge-then-index |
 | B6 global sign-out needs a JWT the email page lacks | Medium | D10 split by entry point; verification test |
 | B7 annotations would invite auto-approval | Medium | D8 annotations corrected; T-ANNOT |
-| B8 `untrusted_` missed group and display names | Medium | D8 extended; anonymous names removed (D7) |
+| B8 `untrusted_` missed group and display names | Medium | D8 extended; anonymous names capped at 40 and filtered since 2026-11-24 (D7) |
 | B9 category stripping breaks emoji | Medium | D8 explicit blocklist |
 | B10 new bill columns leak to link bearers; FK unspecified | Medium | D8 `ON DELETE SET NULL`, allow-list in `publicBill` |
 | B11 every link bearer gets every participant's `user_id` | Medium | P5 widened; payee by participant id |
