@@ -24,6 +24,7 @@ const routeFiles = import.meta.glob('../../src/app/api/**/route.ts');
 // Routes that use no session at all. Each is checked below to really not use one.
 const NO_SESSION: Record<string, string> = {
   '/api/mcp': 'authenticates with a bearer token only (covered by mcp-authz tests)',
+  '/api/agent-access/status': 'public on purpose: one boolean, the same for everyone',
   '/api/scan': 'anonymous receipt scan, rate limited by IP',
   '/api/agent-tokens/revoke-link': 'the "not you?" link works without a session on purpose',
   '/api/oauth/token': 'our own OAuth token endpoint: public clients, no cookies (excluded from the proxy)',
