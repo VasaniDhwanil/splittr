@@ -5,14 +5,13 @@ import { createClient } from '@/lib/supabase/server';
 import { auditAgentCall, hitRateLimit, requestIp } from '@/lib/agent-access';
 import { rateLimit } from '@/lib/rate-limit';
 import { isOAuthEnabled, oauthIssuer } from '@/lib/oauth/config';
-import { checkClientAndRedirect, MAX_STATE, validateAuthorize } from '@/lib/oauth/authorize';
+import { authorizeLimits, checkClientAndRedirect, MAX_STATE, validateAuthorize } from '@/lib/oauth/authorize';
 import { bindingCookieName, bindingCookieOptions, htmlPage, NO_STORE, redirectToClient } from '@/lib/oauth/http';
 import { hashOAuthSecret } from '@/lib/oauth/tokens';
 
 const REQUEST_TTL_SECONDS = 600;
 const IP_LIMIT = 20;
 const USER_LIMIT = 10;
-const WINDOW_SECONDS = 600;
 
 /**
  * The authorization endpoint (docs/specs/mcp-oauth.md S4, A5, A14, A15).
@@ -50,17 +49,23 @@ export async function GET(request: NextRequest) {
 
     // From here a request row is written: throttle by address, then by account
     const ip = requestIp(request);
-    if (!rateLimit(`oauth-authorize:${ip}`, IP_LIMIT, WINDOW_SECONDS * 1000).allowed) {
+    if (!rateLimit(`oauth-authorize:${ip}`, IP_LIMIT, authorizeLimits.windowSeconds * 1000).allowed) {
       return refuse('temporarily_unavailable', 'Too many sign-in attempts. Try again in a few minutes.');
     }
+
+    const tooMany = () => refuse('temporarily_unavailable', 'Too many sign-in attempts. Try again in a few minutes.');
+    // In the database too, so the limit holds across instances: this route
+    // writes a row for anyone who asks, signed in or not
+    const ipHit = await hitRateLimit(`oauth-authorize:ip:${ip}`, authorizeLimits.dbIp, authorizeLimits.windowSeconds);
+    if (!ipHit.allowed) return tooMany();
 
     const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (user) {
-      const hit = await hitRateLimit(`oauth-authorize:user:${user.id}`, USER_LIMIT, WINDOW_SECONDS);
-      if (!hit.allowed) return refuse('temporarily_unavailable', 'Too many sign-in attempts. Try again in a few minutes.');
+      const hit = await hitRateLimit(`oauth-authorize:user:${user.id}`, USER_LIMIT, authorizeLimits.windowSeconds);
+      if (!hit.allowed) return tooMany();
     }
 
     const id = randomBytes(16).toString('base64url');
@@ -86,7 +91,8 @@ export async function GET(request: NextRequest) {
       return refuse('server_error', 'Splittr could not start the sign-in. Try again.');
     }
 
-    await auditAgentCall({ tokenId: null, userId: user?.id ?? null, tool: 'oauth', outcome: 'request_created', ip });
+    // A request nobody owns yet is audited when someone claims it (guardConsent)
+    if (user) await auditAgentCall({ tokenId: null, userId: user.id, tool: 'oauth', outcome: 'request_created', ip });
 
     const response = new NextResponse(null, {
       status: 302,

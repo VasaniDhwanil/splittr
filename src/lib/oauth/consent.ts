@@ -98,8 +98,10 @@ export async function guardConsent(
       .is('grant_id', null);
     const { data: won, error: claimError } = await (previous === null ? claim.is('user_id', null) : claim.eq('user_id', previous)).select('id');
     if (claimError) return { response: noStore(NextResponse.json({ error: 'Internal server error' }, { status: 500 })) };
-    if (won && won.length > 0 && previous !== null) {
-      await auditAgentCall({ tokenId: null, userId: user.id, tool: 'oauth', outcome: 'consent_account_switched', ip: requestIp(request) });
+    if (won && won.length > 0) {
+      // First claim: the audit row /oauth/authorize left out for a signed-out request
+      const outcome = previous === null ? 'request_created' : 'consent_account_switched';
+      await auditAgentCall({ tokenId: null, userId: user.id, tool: 'oauth', outcome, ip: requestIp(request) });
     }
     ({ data: row, error } = await read());
     if (error || !row) return { response: noStore(NextResponse.json({ error: 'Internal server error' }, { status: 500 })) };

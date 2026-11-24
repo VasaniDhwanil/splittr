@@ -241,6 +241,17 @@ describe('GET /api/agent-oauth/requests/[id]', () => {
     }
   });
 
+  it('audits the creation of a request created signed out when it is claimed, with the claimer and the address', async () => {
+    const user = await createUser('claim-audit');
+    const req = await seedRequest(null);
+    signInAs(user);
+    const ip = randomIp();
+    await call(getConsent, req, 'GET', { headers: { 'x-real-ip': ip } });
+    await call(getConsent, req, 'GET', { headers: { 'x-real-ip': ip } });
+    const { data } = await db().from('agent_audit_log').select('tool, outcome').eq('user_id', user.id).eq('ip', ip).order('id');
+    expect(data!.filter((r) => r.outcome === 'request_created')).toEqual([{ tool: 'oauth', outcome: 'request_created' }]);
+  });
+
   it('writes a consent_shown audit row', async () => {
     const user = await createUser('audit');
     signInAs(user);

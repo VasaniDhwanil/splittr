@@ -94,3 +94,10 @@ export function validateAuthorize(params: URLSearchParams): { ok: true; value: V
 
   return { ok: true, value: { codeChallenge: challenge, resource, state, scopes } };
 }
+
+/**
+ * Limits on /oauth/authorize. `dbIp` is the database-backed per-address count
+ * (shared across instances) that guards the unauthenticated request insert;
+ * a mutable object so tests can lower it.
+ */
+export const authorizeLimits = { dbIp: 30, windowSeconds: 600 };

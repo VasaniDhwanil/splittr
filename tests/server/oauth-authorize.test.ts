@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET as authorize } from '@/app/oauth/authorize/route';
+import { authorizeLimits } from '@/lib/oauth/authorize';
 import { createUser, db } from './helpers/db';
 import { signInAs, signOut } from './helpers/session';
 import {
@@ -307,5 +308,49 @@ describe('rate limits', () => {
     for (let i = 0; i < 10; i++) expect(location(await get(good())), `request ${i + 1}`).toContain('/oauth/consent/');
     const limited = await get(good());
     expect(redirected(limited).params.error).toBe('temporarily_unavailable');
+  });
+});
+
+describe('database-backed address limit and the audit row of an unclaimed request (F5)', () => {
+  afterEach(() => {
+    authorizeLimits.dbIp = 30;
+    authorizeLimits.windowSeconds = 600;
+  });
+
+  it('allows 30 per address per 10 minutes in the database, before any request row is written', async () => {
+    expect(authorizeLimits).toMatchObject({ dbIp: 30, windowSeconds: 600 });
+    authorizeLimits.dbIp = 3;
+    const ip = randomIp();
+    const rows = async () => (await db().from('agent_rate_limits').select('count').eq('key', `oauth-authorize:ip:${ip}`)).data!;
+    for (let i = 0; i < 3; i++) expect(location(await get(good(), ip))).toContain('/oauth/consent/');
+    const before = (await db().from('agent_oauth_requests').select('id', { count: 'exact', head: true })).count;
+    const limited = await get(good(), ip);
+    expect(redirected(limited).params.error).toBe('temporarily_unavailable');
+    expect(limited.headers.get('set-cookie')).toBeNull();
+    expect((await db().from('agent_oauth_requests').select('id', { count: 'exact', head: true })).count).toBe(before);
+    expect((await rows())[0].count).toBe(4);
+    expect(location(await get(good()))).toContain('/oauth/consent/');
+  });
+
+  it('starts a new window once the old one is over', async () => {
+    authorizeLimits.dbIp = 2;
+    authorizeLimits.windowSeconds = 2;
+    const ip = randomIp();
+    // begin just after a window boundary so all three calls share one window
+    await new Promise((r) => setTimeout(r, 2000 - (Date.now() % 2000) + 50));
+    expect(location(await get(good(), ip))).toContain('/oauth/consent/');
+    expect(location(await get(good(), ip))).toContain('/oauth/consent/');
+    expect(redirected(await get(good(), ip)).params.error).toBe('temporarily_unavailable');
+    await new Promise((r) => setTimeout(r, 2100));
+    expect(location(await get(good(), ip))).toContain('/oauth/consent/');
+  });
+
+  it('writes no audit row for a request created signed out, and writes it when the request is claimed', async () => {
+    const ip = randomIp();
+    const res = await get(good(), ip);
+    const id = new URL(location(res)!).pathname.split('/').pop()!;
+    const audit = async () => (await db().from('agent_audit_log').select('outcome, user_id').eq('ip', ip)).data!;
+    expect(await audit()).toEqual([]);
+    expect((await db().from('agent_oauth_requests').select('user_id').eq('id', id).single()).data!.user_id).toBeNull();
   });
 });
