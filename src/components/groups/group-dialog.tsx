@@ -11,9 +11,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-/** The one dialog surface every groups dialog shares. */
+/**
+ * The one dialog surface every groups dialog shares. The content is a grid,
+ * whose column would otherwise grow to fit long unbroken text (an invite link)
+ * and push rows past the edge on a phone; `[&>*]:min-w-0` lets it shrink.
+ */
 export const DIALOG_SURFACE =
-  'sm:max-w-md gap-5 rounded-2xl border-white/10 bg-[#0a0a0a] p-6 text-white shadow-2xl';
+  'sm:max-w-md gap-5 rounded-2xl border-white/10 bg-[#0a0a0a] p-6 text-white shadow-2xl [&>*]:min-w-0';
 
 interface GroupDialogProps {
   open: boolean;
