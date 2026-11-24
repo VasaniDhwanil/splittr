@@ -4,13 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 import { ensureProfile } from '@/lib/auth-profile'
 import { clearMintLock } from '@/lib/agent-access'
 import { ALLOWED_ORIGINS } from '@/lib/site-origin'
+import { safeNext } from '@/lib/safe-next'
 import { isOAuthAccessToken } from '@/lib/supabase/oauth-guard'
-
-/** Only ever redirect to a same-site path — never to an arbitrary URL. */
-function safePath(raw: string | null | undefined): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/'
-  return raw
-}
 
 /**
  * Handles both magic-link shapes:
@@ -46,7 +41,7 @@ export async function GET(request: Request) {
           : redirectToUrl.pathname + redirectToUrl.search
     }
   }
-  const dest = safePath(next)
+  const dest = safeNext(next)
 
   // The email link always points at the production Site URL. If sign-in was
   // requested from a different allowed origin (e.g. localhost during dev),

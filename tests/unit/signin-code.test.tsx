@@ -102,3 +102,22 @@ describe('sign-in code entry', () => {
     expect(screen.queryByText(/Use the code, not the link/)).toBeNull();
   });
 });
+
+describe('sign-in redirect target', () => {
+  it.each(['/\t/evil.com', '/\n/evil.com', '/%09/evil.com', '//evil.com', 'https://evil.com', 'javascript:alert(1)'])(
+    'never leaves the site for next=%j',
+    async (next) => {
+      search = `next=${encodeURIComponent(next)}`;
+      mockFetch({ 'POST /auth/finish': { body: { ok: true } } });
+      render(<SignInPage />);
+      await sendEmail();
+      fireEvent.change(screen.getByLabelText('Enter the 6-digit code from the email'), { target: { value: '123456' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+      await waitFor(() => expect(assign).toHaveBeenCalled());
+      for (const [url] of assign.mock.calls) {
+        expect(new URL(url as string, 'http://localhost:3199').origin).toBe('http://localhost:3199');
+      }
+      expect(assign).toHaveBeenCalledWith('/');
+    }
+  );
+});
