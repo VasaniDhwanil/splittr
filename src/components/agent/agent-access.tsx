@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
@@ -15,7 +16,8 @@ import {
   type TokenRow,
 } from '@/lib/agent-ui';
 import { connectionTitle } from '@/lib/oauth-ui';
-import { CopyButton } from './copy-button';
+import { useClaudeConnectEnabled } from './use-claude-connect';
+import { ClaudeCodeSteps, ClaudeWebSteps, McpAddress } from './connect-claude';
 import { CreateTokenDialog } from './create-token-dialog';
 
 interface TokenList {
@@ -24,6 +26,20 @@ interface TokenList {
 }
 
 const labelOf = (t: TokenRow) => (t.kind === 'oauth' ? connectionTitle(t.destination) : t.name);
+
+/** Link to /connect, shown once the server says Claude can connect. */
+function ConnectPageLink() {
+  const enabled = useClaudeConnectEnabled();
+  if (!enabled) return null;
+  return (
+    <Link
+      href="/connect"
+      className="shrink-0 text-xs text-white/50 underline-offset-4 transition-colors hover:text-white hover:underline"
+    >
+      Open the connect page
+    </Link>
+  );
+}
 
 /** One line of state: a dot and a plain word. Only an active token is green. */
 function TokenState({ token }: { token: TokenRow }) {
@@ -211,7 +227,6 @@ export function AgentAccess({ index = 4 }: { index?: number }) {
   const hasLive = data.tokens.some((t) => t.status === 'active' || t.status === 'suspended');
   const connections = data.tokens.filter((t) => t.kind === 'oauth');
   const personal = data.tokens.filter((t) => t.kind !== 'oauth');
-  const claudeCodeCommand = `claude mcp add --transport http splittr ${data.mcpUrl}`;
 
   const renderList = (rows: TokenRow[], label: string) => (
     <ul className="surface divide-y divide-white/[0.06] overflow-hidden rounded-2xl" aria-label={label}>
@@ -237,47 +252,21 @@ export function AgentAccess({ index = 4 }: { index?: number }) {
         <div className="space-y-8">
           {data.mcpUrl && (
             <div className="space-y-3">
-              <h3 className="text-sm font-medium text-white/70">Connect Claude</h3>
+              <div className="flex items-baseline justify-between gap-4">
+                <h3 className="text-sm font-medium text-white/70">Connect Claude</h3>
+                <ConnectPageLink />
+              </div>
               <div className="surface space-y-5 rounded-2xl p-4">
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-white/40">Splittr&apos;s address</p>
-                  <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] py-2 pr-2 pl-4">
-                    <code className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-white/80">
-                      {data.mcpUrl}
-                    </code>
-                    <CopyButton value={data.mcpUrl} label="Copy" ariaLabel="Copy address" />
-                  </div>
-                  <p className="text-xs leading-relaxed text-white/40">
-                    Type it exactly as shown: with <span className="font-mono">www</span>, and nothing after{' '}
-                    <span className="font-mono">/api/mcp</span>. Leaving out <span className="font-mono">www</span> or
-                    adding a <span className="font-mono">/</span> at the end will not connect.
-                  </p>
-                </div>
+                <McpAddress mcpUrl={data.mcpUrl} />
 
                 <div className="space-y-2 border-t border-white/[0.06] pt-5">
                   <p className="text-sm font-medium text-white">In Claude on the web, the Desktop app or your phone</p>
-                  <ol className="list-decimal space-y-1 pl-5 text-sm leading-relaxed text-white/60 marker:text-white/30">
-                    <li>
-                      On claude.ai or in the Desktop app, open Customize, then Connectors.
-                    </li>
-                    <li>Choose Add, then Add custom connector.</li>
-                    <li>Give it a name, such as Splittr, and paste the address above.</li>
-                    <li>Sign in to Splittr when Claude asks. Once it is added, it is there on your phone too.</li>
-                  </ol>
+                  <ClaudeWebSteps />
                 </div>
 
                 <div className="space-y-2 border-t border-white/[0.06] pt-5">
                   <p className="text-sm font-medium text-white">In Claude Code</p>
-                  <ol className="list-decimal space-y-1 pl-5 text-sm leading-relaxed text-white/60 marker:text-white/30">
-                    <li>Run this command in your terminal.</li>
-                    <li>In Claude Code, run /mcp, pick Splittr, and follow the steps in your browser to sign in.</li>
-                  </ol>
-                  <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] py-2 pr-2 pl-4">
-                    <code className="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-white/80">
-                      {claudeCodeCommand}
-                    </code>
-                    <CopyButton value={claudeCodeCommand} label="Copy" ariaLabel="Copy command" />
-                  </div>
+                  <ClaudeCodeSteps mcpUrl={data.mcpUrl} />
                 </div>
               </div>
             </div>
