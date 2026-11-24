@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:server": "vitest run --config vitest.server.config.ts",
-    "db:start": "npx -y supabase@2.122.0 start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,postgres-meta,mailpit",
+    "db:start": "npx -y supabase@2.122.0 start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,postgres-meta",
     "db:stop": "npx -y supabase@2.122.0 stop",
     "db:reset": "npx -y supabase@2.122.0 db reset",
     "test:e2e": "playwright test"
