@@ -3,16 +3,20 @@
  * ledger folds a nameless participant into a group member whose display name
  * matches, which is fine on a screen but lets anyone who types a member's name
  * redirect a debt. Here only rows linked by account count; a name match is
- * reported separately, with no handle.
+ * reported separately, with no handle. Their typed names are shown as
+ * untrusted_name (capped, instruction-filtered) so "who owes me" is answerable.
  */
 import { calculateSplits } from '@/lib/calculations';
 import type { Bill, BillItem, ItemClaim, Participant } from '@/types';
+import { untrusted } from './sanitize';
 import type { BillDetail, ParticipantRow } from './authz';
 
 export interface UnverifiedDebt {
   kind: 'guest_owes_you' | 'name_matches_you';
   bill_id: string;
   amount: number;
+  /** What the guest (or the name-alike) typed: written by a stranger, so capped and run through the instruction filter. */
+  untrusted_name: string;
 }
 
 export interface AgentLedger {
@@ -20,6 +24,9 @@ export interface AgentLedger {
   net: Map<string, number>;
   unverified: UnverifiedDebt[];
 }
+
+/** Longest participant name an agent is shown. */
+export const PARTICIPANT_NAME_MAX = 40;
 
 export const cents = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
@@ -58,9 +65,9 @@ export function computeAgentLedger(details: BillDetail[], actorId: string, actor
 
       if (debtor === null) {
         if (creditor === actorId) {
-          unverified.push({ kind: 'guest_owes_you', bill_id: bill.id, amount: cents(amount) });
+          unverified.push({ kind: 'guest_owes_you', bill_id: bill.id, amount: cents(amount), untrusted_name: untrusted(row.name, PARTICIPANT_NAME_MAX) });
         } else if (myName && row.name.trim().toLowerCase() === myName) {
-          unverified.push({ kind: 'name_matches_you', bill_id: bill.id, amount: cents(amount) });
+          unverified.push({ kind: 'name_matches_you', bill_id: bill.id, amount: cents(amount), untrusted_name: untrusted(row.name, PARTICIPANT_NAME_MAX) });
         }
         continue;
       }

@@ -13,7 +13,7 @@ import {
   type BillDetail,
   type ParticipantRow,
 } from './authz';
-import { accountOf, cents, computeAgentLedger } from './agent-ledger';
+import { accountOf, cents, computeAgentLedger, PARTICIPANT_NAME_MAX } from './agent-ledger';
 import { defineTool } from './tool-types';
 
 const NAME_MAX = 100;
@@ -120,7 +120,7 @@ export const getBill = defineTool({
   name: 'get_bill',
   scope: 'read',
   description:
-    'Get one bill you are related to: items, totals and who owes what. People without a Splittr account appear only as "guest #n" with their share, never by name. ' +
+    'Get one bill you are related to: items, totals and who owes what. People without a Splittr account are labelled "guest #n" and carry the name they typed as untrusted_name, with their share. ' +
     `${TRUST_NOTE} ${SHARE_NOTE}`,
   inputSchema: z.strictObject({ bill_id: z.uuid() }),
   annotations: { title: 'Get a bill', ...READ_ONLY },
@@ -143,8 +143,8 @@ export const getBill = defineTool({
         is_you: isYou,
         is_host: p.is_creator,
         has_account: hasAccount,
-        // Anonymous rows never get a name: it is text a stranger typed
-        ...(isYou ? { name: cleanForAgent(p.name, NAME_MAX) } : hasAccount ? { untrusted_name: untrusted(p.name, NAME_MAX) } : {}),
+        // Everyone else's name is text a stranger typed: untrusted_name, filtered, capped at 40
+        ...(isYou ? { name: cleanForAgent(p.name, PARTICIPANT_NAME_MAX) } : { untrusted_name: untrusted(p.name, PARTICIPANT_NAME_MAX) }),
         share: cents(shares.get(p.id) ?? 0),
         paid: p.payment_status === 'paid',
       };
@@ -206,7 +206,7 @@ export const getBalances = defineTool({
   scope: 'read',
   description:
     'Net amounts between you and other Splittr accounts over unsettled bills, for one group or all of them. Only people linked by account are counted; ' +
-    'guests and name look-alikes are listed separately under "unverified" with no payment handles. Payment handles are given only for people you owe. ' +
+    'guests and name look-alikes are listed separately under "unverified" with the name they typed as untrusted_name and no payment handles. Payment handles are given only for people you owe. ' +
     `${TRUST_NOTE} ${SHARE_NOTE}`,
   inputSchema: z.strictObject({ group_id: z.uuid().optional() }),
   annotations: { title: 'Get balances', ...READ_ONLY },

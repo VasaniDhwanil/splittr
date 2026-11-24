@@ -53,8 +53,8 @@ const INSTRUCTION_PATTERNS = [
 
 /**
  * A cheap filter for the laziest injection attempts. Trivially bypassed, so
- * nothing relies on it: the protections that count are not returning
- * strangers' names at all and requiring approval for every write.
+ * nothing relies on it: the protection that counts is requiring
+ * approval for every write, with names capped and labelled untrusted.
  */
 export function looksLikeInstructions(text: string): boolean {
   return INSTRUCTION_PATTERNS.some((pattern) => pattern.test(text));

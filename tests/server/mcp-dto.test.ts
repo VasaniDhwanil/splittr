@@ -48,7 +48,7 @@ beforeAll(async () => {
   const other = await createGroup(host, [actor]);
   await db().from('groups').update({ name: 'Assistant Coach' }).eq('id', other.id);
 
-  // The actor's own bill: hostile text they wrote themselves, an emoji sequence, a linked member, two guests
+  // The actor's own bill: hostile text they wrote themselves, an emoji sequence, a linked member, four guests (one instruction-looking, one with a 60-character name)
   const own = await createBill({
     creator: actor,
     name: HOSTILE,
@@ -60,8 +60,10 @@ beforeAll(async () => {
     extra: { zelle_handle: 'bill-zelle@example.com', venmo_handle: '@bill-venmo', tax: 3, tip_amount: 5, tip_percent: 10 },
   });
   const memberRow = await joinBill(own.id, { name: INSTRUCTION, user: member });
-  const guestA = await joinBill(own.id, { name: 'Secret Guest Alpha' });
-  await joinBill(own.id, { name: `Secret Guest Beta ${TAGS}` });
+  const guestA = await joinBill(own.id, { name: 'Guest Alpha' });
+  await joinBill(own.id, { name: `Guest Beta ${TAGS}` });
+  await joinBill(own.id, { name: INSTRUCTION });
+  await joinBill(own.id, { name: 'G'.repeat(60) });
   await db().from('item_claims').insert([
     { participant_id: own.creatorParticipantId, item_id: own.itemIds[0], share: 1 },
     { participant_id: memberRow.id, item_id: own.itemIds[1], share: 1 },
@@ -125,9 +127,6 @@ beforeAll(async () => {
       'bill-zelle@example.com',
       'secret/qr.png',
       '@bill-venmo',
-      'Secret Guest Alpha',
-      'Secret Guest Beta',
-      'Anonymous Gamma',
     ],
     responses: Object.fromEntries(Object.entries(results).map(([k, v]) => [k, v.text])),
     data: Object.fromEntries(Object.entries(results).map(([k, v]) => [k, v.data])),
@@ -195,15 +194,22 @@ describe('allow-listed output', () => {
     }
   });
 
-  it('names a guest only by a label and a share, and has no name for guests anywhere', () => {
+  it('labels a guest and gives the typed name as untrusted_name, never as name', () => {
     const people = s.data.get_bill_own.people as { label: string; has_account: boolean; share: number; name?: string; untrusted_name?: string }[];
     const guests = people.filter((p) => !p.has_account);
-    expect(guests.map((g) => g.label)).toEqual(['guest #1', 'guest #2']);
-    for (const guest of guests) {
-      expect(guest).not.toHaveProperty('name');
-      expect(guest).not.toHaveProperty('untrusted_name');
-    }
-    expect(people.map((p) => p.label)).toEqual(['you', 'member #1', 'guest #1', 'guest #2']);
+    expect(guests.map((g) => g.label)).toEqual(['guest #1', 'guest #2', 'guest #3', 'guest #4']);
+    for (const guest of guests) expect(guest).not.toHaveProperty('name');
+    expect(guests[0].untrusted_name).toBe('Guest Alpha');
+    // invisible tag characters are stripped
+    expect(guests[1].untrusted_name).toBe('Guest Beta');
+    // instruction-looking text is withheld, as it is for account holders
+    expect(guests[2].untrusted_name).toBe(WITHHELD);
+    // a 60-character name is capped at 40
+    expect(guests[3].untrusted_name).toBe('G'.repeat(40));
+    // a guest on a bill someone else hosts is named the same way
+    const theirsGuest = (s.data.get_bill_theirs.people as { label: string; untrusted_name?: string }[]).find((p) => p.label === 'guest #1')!;
+    expect(theirsGuest.untrusted_name).toBe('Anonymous Gamma');
+    expect(people.map((p) => p.label)).toEqual(['you', 'member #1', 'guest #1', 'guest #2', 'guest #3', 'guest #4']);
     expect(people[0]).toMatchObject({ is_you: true, is_host: true, name: 'Actor Name' });
     // 20 of 40 in items, so half the 3 tax and half the 5 tip: 20 + 1.5 + 2.5
     expect(people[0].share).toBe(24);
