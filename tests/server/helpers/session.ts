@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { vi } from 'vitest';
 import { rejectOAuthSessions } from '@/lib/supabase/oauth-guard';
 
@@ -34,6 +35,16 @@ export function signInAsOAuthClient(user: TestUser): void {
   viaOAuth = true;
 }
 
+const scoped = new AsyncLocalStorage<{ user: TestUser | null }>();
+
+/**
+ * Runs `fn` as `user` without touching the global session, so two requests
+ * made as different accounts can be in flight at once.
+ */
+export function runAs<T>(user: TestUser | null, fn: () => Promise<T>): Promise<T> {
+  return scoped.run({ user }, fn);
+}
+
 export function signOut(): void {
   current = null;
   viaOAuth = false;
@@ -57,30 +68,39 @@ export const globalSignOut = vi.fn(async () => ({ error: null }));
  * client against the local database.
  */
 export function fakeServerClient() {
-  const session = () => (current ? { access_token: accessTokenFor(current, viaOAuth) } : null);
+  const store = () => scoped.getStore();
+  const who = (): TestUser | null => {
+    const store = scoped.getStore();
+    return store ? store.user : current;
+  };
+  const session = () => {
+    const user = who();
+    return user ? { access_token: accessTokenFor(user, store() ? false : viaOAuth) } : null;
+  };
   const raw = {
     auth: {
       // Like GoTrue's /user: any valid access token resolves to its user,
       // an OAuth client's included.
-      getUser: async () => ({ data: { user: current }, error: null }),
+      getUser: async () => ({ data: { user: who() }, error: null }),
       getSession: async () => ({ data: { session: session() }, error: null }),
       // Verified claims, like GoTrueClient.getClaims(): no jwt argument means "the session's"
       getClaims: async () => {
         const s = session();
-        if (!s || !current) return { data: null, error: { message: 'Auth session missing' } };
+        const me = who();
+        if (!s || !me) return { data: null, error: { message: 'Auth session missing' } };
         return {
-          data: { claims: { sub: current.id, amr, aal: 'aal1', ...(viaOAuth ? { client_id: 'x' } : {}) }, header: {}, signature: new Uint8Array() },
+          data: { claims: { sub: me.id, amr, aal: 'aal1', ...(!store() && viaOAuth ? { client_id: 'x' } : {}) }, header: {}, signature: new Uint8Array() },
           error: null,
         };
       },
       signOut: globalSignOut,
       verifyOtp: async () => ({
-        data: { user: current, session: session() },
-        error: current ? null : { message: 'invalid token' },
+        data: { user: who(), session: session() },
+        error: who() ? null : { message: 'invalid token' },
       }),
       exchangeCodeForSession: async () => ({
-        data: { user: current, session: session() },
-        error: current ? null : { message: 'invalid code' },
+        data: { user: who(), session: session() },
+        error: who() ? null : { message: 'invalid code' },
       }),
     },
   };

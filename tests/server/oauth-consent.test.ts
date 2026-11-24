@@ -30,7 +30,7 @@ import { POST as sendCode } from '@/app/api/agent-oauth/requests/[id]/code/route
 import { POST as approve } from '@/app/api/agent-oauth/requests/[id]/approve/route';
 import { POST as deny } from '@/app/api/agent-oauth/requests/[id]/deny/route';
 import { createUser, db, params, sql } from './helpers/db';
-import { signInAs, signOut, setSessionAmr, type TestUser } from './helpers/session';
+import { runAs, signInAs, signOut, setSessionAmr, type TestUser } from './helpers/session';
 import { insertToken } from './helpers/agent';
 import {
   CLAUDE_CODE_CLIENT_ID,
@@ -178,12 +178,12 @@ describe('GET /api/agent-oauth/requests/[id]', () => {
     restore = enableOAuth();
   });
 
-  it('is 404 for anyone but the owner, even holding the cookie, and for expired or decided requests', async () => {
+  it('is 404 for anyone but the owner who lacks the cookie (with it, an account switch: below), and for expired or decided requests', async () => {
     const owner = await createUser('owner');
     const other = await createUser('other');
     const req = await seedRequest(owner);
     signInAs(other);
-    expect((await call(getConsent, req, 'GET')).status).toBe(404);
+    expect((await call(getConsent, req, 'GET', { cookie: null })).status).toBe(404);
     signInAs(owner);
     expect((await call(getConsent, req, 'GET')).status).toBe(200);
     expect((await call(getConsent, await seedRequest(owner, { expiresAt: new Date(Date.now() - 1000) }), 'GET')).status).toBe(404);
@@ -208,7 +208,7 @@ describe('GET /api/agent-oauth/requests/[id]', () => {
     }
   });
 
-  it('is claimed by the first signed-in account that presents the cookie; nobody else gets it', async () => {
+  it('is claimed by the first signed-in account that presents the cookie; without the cookie nobody else gets it', async () => {
     const first = await createUser('first');
     const second = await createUser('second');
     const req = await seedRequest(null);
@@ -216,22 +216,29 @@ describe('GET /api/agent-oauth/requests/[id]', () => {
     expect((await call(getConsent, req, 'GET')).status).toBe(200);
     expect((await db().from('agent_oauth_requests').select('user_id').eq('id', req.id).single()).data!.user_id).toBe(first.id);
     signInAs(second);
-    expect((await call(getConsent, req, 'GET')).status).toBe(404);
+    expect((await call(getConsent, req, 'GET', { cookie: null })).status).toBe(404);
+    expect((await call(getConsent, req, 'GET', { cookie: 'x'.repeat(43) })).status).toBe(404);
     signInAs(first);
     expect((await call(getConsent, req, 'GET')).status).toBe(200);
   });
 
-  it('is claimed by exactly one of two accounts racing for an unowned request', async () => {
+  it('is owned by exactly one of two accounts racing for an unowned request, through the route', async () => {
     const a = await createUser('race-a');
     const b = await createUser('race-b');
-    const req = await seedRequest(null);
-    const attempt = async (user: TestUser) => {
-      // the session double is global, so take the claim step directly
-      const r = await db().from('agent_oauth_requests').update({ user_id: user.id }).eq('id', req.id).is('user_id', null).select('id');
-      return r.data?.length ?? 0;
-    };
-    const wins = await Promise.all([attempt(a), attempt(b)]);
-    expect(wins.reduce((x, y) => x + y, 0)).toBe(1);
+    for (let round = 0; round < 10; round++) {
+      const req = await seedRequest(null);
+      const statuses = await Promise.all([a, b].map((user) => runAs(user, async () => (await call(getConsent, req, 'GET')).status)));
+      const owner = (await db().from('agent_oauth_requests').select('user_id').eq('id', req.id).single()).data!.user_id;
+      expect([a.id, b.id]).toContain(owner);
+      // the winner sees it; the loser, who lost the compare-and-set, gets the 404
+      expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+      expect(statuses.filter((s) => s === 404)).toHaveLength(1);
+      // and later reads agree
+      const winner = owner === a.id ? a : b;
+      const loser = owner === a.id ? b : a;
+      expect(await runAs(winner, async () => (await call(getConsent, req, 'GET')).status)).toBe(200);
+      expect(await runAs(loser, async () => (await call(getConsent, req, 'GET', { cookie: null })).status)).toBe(404);
+    }
   });
 
   it('writes a consent_shown audit row', async () => {
@@ -337,7 +344,7 @@ describe('POST .../code', () => {
     const other = await createUser('code8');
     const req = await hostedRequest(owner);
     signInAs(other);
-    expect((await call(sendCode, req, 'POST')).status).toBe(404);
+    expect((await call(sendCode, req, 'POST', { cookie: null })).status).toBe(404);
     signInAs(owner);
     expect((await call(sendCode, await hostedRequest(owner, { status: 'denied' }), 'POST')).status).toBe(404);
     expect((await call(sendCode, await hostedRequest(owner, { expiresAt: new Date(Date.now() - 1000) }), 'POST')).status).toBe(404);
@@ -618,7 +625,7 @@ describe('POST .../approve: input, caps and replacement', () => {
     expect((await approveWith(req, { scopes: ['read'] })).status).toBe(401);
     const other = await createUser('input2');
     signInAs(other);
-    expect((await approveWith(req, { scopes: ['read'] })).status).toBe(404);
+    expect((await approveWith(req, { scopes: ['read'] }, { cookie: null })).status).toBe(404);
   });
 
   it('answers expired for an owned request that ran out, and 404 for a decided one', async () => {
@@ -724,7 +731,7 @@ describe('POST .../deny', () => {
     signOut();
     expect((await call(deny, req, 'POST')).status).toBe(401);
     signInAs(await createUser('deny4'));
-    expect((await call(deny, req, 'POST')).status).toBe(404);
+    expect((await call(deny, req, 'POST', { cookie: null })).status).toBe(404);
     signInAs(owner);
     expect((await call(deny, await seedRequest(owner, { expiresAt: new Date(Date.now() - 1000) }), 'POST')).status).toBe(404);
   });
@@ -787,5 +794,107 @@ describe('the binding cookie is per request', () => {
     signInAs(user);
     const a = await start(CLAUDE_CODE_CLIENT_ID, 'http://localhost:54321/callback');
     expect((await asking({ 'splittr-oauth': a.value }, a.id)).status).toBe(404);
+  });
+});
+
+describe('"Not you? Switch account"', () => {
+  const approveWith = (req: SeedRequest, body: Record<string, unknown>) => call(approve, req, 'POST', { body });
+
+  it('lets a different account with the binding cookie take over, then approve with its own emailed code', async () => {
+    const a = await createUser('switch-a');
+    const b = await createUser('switch-b');
+    const req = await hostedRequest(a);
+    signInAs(a);
+    expect((await call(sendCode, req, 'POST')).status).toBe(200);
+    const codeForA = lastCode();
+
+    signInAs(b);
+    const shown = await call(getConsent, req, 'GET');
+    expect(shown.status).toBe(200);
+    expect(await json(shown)).toMatchObject({ account_email: b.email, step_up: { code_sent: false, code_required: true } });
+    const row = (await db().from('agent_oauth_requests').select('user_id, code_hmac, code_expires_at, attempts').eq('id', req.id).single()).data!;
+    expect(row).toMatchObject({ user_id: b.id, code_hmac: null, code_expires_at: null, attempts: 0 });
+
+    // A's code, sent to A's inbox, cannot approve for B
+    const wrong = await approveWith(req, { scopes: ['read'], code: codeForA });
+    expect(wrong.status).toBe(400);
+
+    expect((await call(sendCode, req, 'POST')).status).toBe(200);
+    expect(mail.sent[mail.sent.length - 1].to).toBe(b.email);
+    const ok = await approveWith(req, { scopes: ['read'], code: lastCode() });
+    expect(ok.status).toBe(200);
+    const grant = (await db().from('agent_tokens').select('user_id').eq('oauth_client_id', HOSTED_CLIENT_ID).eq('user_id', b.id)).data!;
+    expect(grant).toHaveLength(1);
+  });
+
+  it('a code sent while A owned the request fails for B even when B never asks for one', async () => {
+    const a = await createUser('switch-c');
+    const b = await createUser('switch-d');
+    const req = await hostedRequest(a);
+    signInAs(a);
+    await call(sendCode, req, 'POST');
+    const codeForA = lastCode();
+    signInAs(b);
+    await call(getConsent, req, 'GET');
+    const res = await approveWith(req, { scopes: ['read'], code: codeForA });
+    expect(await json(res)).toMatchObject({ code: 'code_required' });
+    expect((await db().from('agent_tokens').select('id').eq('user_id', b.id).eq('kind', 'oauth')).data).toHaveLength(0);
+  });
+
+  it('gives B a 404 without the cookie, and leaves the owner as it was', async () => {
+    const a = await createUser('switch-e');
+    const b = await createUser('switch-f');
+    const req = await hostedRequest(a);
+    signInAs(b);
+    for (const handler of [getConsent, sendCode, approve, deny]) {
+      expect((await call(handler, req, 'POST' as 'GET', { cookie: null, body: { scopes: ['read'] } })).status).toBe(404);
+    }
+    expect((await db().from('agent_oauth_requests').select('user_id').eq('id', req.id).single()).data!.user_id).toBe(a.id);
+  });
+
+  it('does not take over a decided, expired or already granted request', async () => {
+    const a = await createUser('switch-g');
+    const b = await createUser('switch-h');
+    signInAs(b);
+    for (const extra of [{ status: 'denied' as const }, { status: 'approved' as const }, { expiresAt: new Date(Date.now() - 1000) }]) {
+      const req = await seedRequest(a, extra);
+      expect((await call(getConsent, req, 'GET')).status).toBe(404);
+      expect((await db().from('agent_oauth_requests').select('user_id').eq('id', req.id).single()).data!.user_id).toBe(a.id);
+    }
+    const granted = await seedRequest(a);
+    const { data: grant } = await db()
+      .from('agent_tokens')
+      .insert({ user_id: a.id, name: 'Claude', kind: 'oauth', scopes: ['read'], oauth_client_id: CLAUDE_CODE_CLIENT_ID, oauth_destination: 'loopback', oauth_status: 'pending', expires_at: new Date(Date.now() + 600_000).toISOString(), revoke_link_hash: sha('x' + granted.id) })
+      .select('id')
+      .single();
+    await db().from('agent_oauth_requests').update({ grant_id: grant!.id }).eq('id', granted.id);
+    expect((await call(getConsent, granted, 'GET')).status).toBe(404);
+    expect((await db().from('agent_oauth_requests').select('user_id').eq('id', granted.id).single()).data!.user_id).toBe(a.id);
+  });
+
+  it('writes an audit row for the takeover, and none for a first claim', async () => {
+    const a = await createUser('switch-i');
+    const b = await createUser('switch-j');
+    const first = await seedRequest(null);
+    signInAs(a);
+    await call(getConsent, first, 'GET');
+    const taken = await seedRequest(a);
+    signInAs(b);
+    await call(getConsent, taken, 'GET');
+    const rows = (await db().from('agent_audit_log').select('user_id, outcome').in('outcome', ['consent_account_switched'])).data!.filter((r) => [a.id, b.id].includes(r.user_id));
+    expect(rows).toEqual([{ user_id: b.id, outcome: 'consent_account_switched' }]);
+  });
+
+  it('two accounts racing to take over an owned request end with one owner and one 200', async () => {
+    const owner = await createUser('switch-k');
+    const b = await createUser('switch-l');
+    const c = await createUser('switch-m');
+    for (let round = 0; round < 8; round++) {
+      const req = await seedRequest(owner);
+      const statuses = await Promise.all([b, c].map((user) => runAs(user, async () => (await call(getConsent, req, 'GET')).status)));
+      expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+      const now = (await db().from('agent_oauth_requests').select('user_id').eq('id', req.id).single()).data!.user_id;
+      expect([b.id, c.id]).toContain(now);
+    }
   });
 });

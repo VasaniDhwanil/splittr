@@ -2,13 +2,14 @@
  * What every consent API starts with: feature switch, same-site Origin (POST),
  * session, binding cookie, ownership, status and expiry
  * (docs/specs/mcp-oauth.md A5, A15, section 14). Anyone who is not the
- * request's owner, in the browser that started it, gets the same 404.
+ * request's owner, in the browser that started it, gets the same 404 (an
+ * account switch in that browser takes the request over: see below).
  */
 import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
-import { isSameSiteOrigin, notFound, noStore, type RouteUser } from '@/lib/agent-access';
+import { auditAgentCall, isSameSiteOrigin, notFound, noStore, requestIp, type RouteUser } from '@/lib/agent-access';
 import { findClient, type OAuthClient } from '@/lib/oauth/clients';
 import { isOAuthEnabled } from '@/lib/oauth/config';
 import { BINDING_COOKIE_SHAPE, bindingCookieName } from '@/lib/oauth/http';
@@ -28,6 +29,7 @@ export interface ConsentRequestRow {
   code_hmac: string | null;
   code_expires_at: string | null;
   attempts: number;
+  grant_id: string | null;
 }
 
 export type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -43,7 +45,7 @@ export interface ConsentContext {
 
 const ID_SHAPE = /^[A-Za-z0-9_-]{22}$/;
 const COLUMNS =
-  'id, client_id, redirect_uri, state, scopes_requested, resource, binding_hash, user_id, expires_at, status, code_hmac, code_expires_at, attempts';
+  'id, client_id, redirect_uri, state, scopes_requested, resource, binding_hash, user_id, expires_at, status, code_hmac, code_expires_at, attempts, grant_id';
 
 const sameHash = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -78,10 +80,27 @@ export async function guardConsent(
   if (error) return { response: noStore(NextResponse.json({ error: 'Internal server error' }, { status: 500 })) };
   if (!row || !sameHash(row.binding_hash, hashOAuthSecret(cookie))) return { response: noStore(notFound()) };
 
-  // The first signed-in account to present the binding cookie owns the request
-  // (usually it already does: /oauth/authorize owns it when a session exists)
-  if (row.user_id === null && row.status === 'pending') {
-    await db.from('agent_oauth_requests').update({ user_id: user.id }).eq('id', id).is('user_id', null);
+  // The binding cookie proves this is the browser that started the request,
+  // so the signed-in account may own it: the first account to present it
+  // (usually /oauth/authorize already did this) or, for "Not you? Switch
+  // account", a different one while nothing has been granted yet. Taking over
+  // clears the emailed code, so a code sent to the previous account's inbox
+  // can never approve for the new one. One compare-and-set on the owner seen:
+  // of several accounts racing for the same request exactly one wins.
+  const takeable = row.status === 'pending' && row.grant_id === null && new Date(row.expires_at).getTime() > Date.now();
+  if (row.user_id !== user.id && takeable) {
+    const previous = row.user_id;
+    const claim = db
+      .from('agent_oauth_requests')
+      .update({ user_id: user.id, code_hmac: null, code_expires_at: null, attempts: 0 })
+      .eq('id', id)
+      .eq('status', 'pending')
+      .is('grant_id', null);
+    const { data: won, error: claimError } = await (previous === null ? claim.is('user_id', null) : claim.eq('user_id', previous)).select('id');
+    if (claimError) return { response: noStore(NextResponse.json({ error: 'Internal server error' }, { status: 500 })) };
+    if (won && won.length > 0 && previous !== null) {
+      await auditAgentCall({ tokenId: null, userId: user.id, tool: 'oauth', outcome: 'consent_account_switched', ip: requestIp(request) });
+    }
     ({ data: row, error } = await read());
     if (error || !row) return { response: noStore(NextResponse.json({ error: 'Internal server error' }, { status: 500 })) };
   }
