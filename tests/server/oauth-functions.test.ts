@@ -537,7 +537,7 @@ describe('prune_agent_access', () => {
     const live = await connect(user);
     const abandoned = await callApprove(user, await seedRequest(user));
     const oldRequest = await seedRequest(user, { expiresAt: new Date(Date.now() - 2 * 86_400_000) });
-    await sql(`update public.agent_tokens set expires_at = now() - interval '8 days' where id = $1`, [abandoned.result.grant_id]);
+    await sql(`update public.agent_tokens set created_at = now() - interval '31 days', expires_at = now() - interval '31 days' + interval '5 minutes' where id = $1`, [abandoned.result.grant_id]);
     await sql(`update public.agent_oauth_codes set expires_at = now() - interval '2 days' where grant_id = $1`, [abandoned.result.grant_id]);
     await sql(`update public.agent_oauth_tokens set expires_at = now() - interval '2 days' where hash = $1`, [sha(live.pair.access)]);
 
@@ -549,6 +549,40 @@ describe('prune_agent_access', () => {
     const remaining = await oauthTokens(live.grantId);
     expect(remaining.map((t) => t.type)).toEqual(['refresh']);
     expect((await grantRow(live.grantId)).oauth_status).toBe('live');
+  });
+});
+
+describe('prune_agent_access and the Not-you link (F8)', () => {
+  const pendingGrantAged = async (user: TestUser, age: string) => {
+    const { result } = await callApprove(user, await seedRequest(user));
+    // created `age` ago, expired five minutes after that, like a code nobody redeemed
+    await sql(
+      `update public.agent_tokens set created_at = now() - $2::interval, expires_at = now() - $2::interval + interval '5 minutes' where id = $1`,
+      [result.grant_id, age]
+    );
+    return result.grant_id!;
+  };
+  const exists = async (id: string) => (await db().from('agent_tokens').select('id').eq('id', id)).data!.length === 1;
+
+  it('keeps a never-redeemed pending grant for 30 days from its creation, then prunes it', async () => {
+    const user = await createUser('prune30');
+    const young = await pendingGrantAged(user, '29 days 23 hours');
+    const justOver = await pendingGrantAged(user, '30 days 1 hour');
+    const old = await pendingGrantAged(user, '45 days');
+    const fresh = (await callApprove(user, await seedRequest(user))).result.grant_id!;
+    await db().rpc('prune_agent_access');
+    expect(await exists(young)).toBe(true);
+    expect(await exists(fresh)).toBe(true);
+    expect(await exists(justOver)).toBe(false);
+    expect(await exists(old)).toBe(false);
+  });
+
+  it('never prunes a live grant by this rule, however old', async () => {
+    const user = await createUser('prune-live');
+    const { grantId } = await connect(user);
+    await sql(`update public.agent_tokens set created_at = now() - interval '60 days' where id = $1`, [grantId]);
+    await db().rpc('prune_agent_access');
+    expect(await exists(grantId)).toBe(true);
   });
 });
 
@@ -585,7 +619,7 @@ describe('privileges', () => {
   });
 
   it('has RLS on and nothing readable or writable for anon or authenticated', async () => {
-    for (const table of ['agent_oauth_requests', 'agent_oauth_codes', 'agent_oauth_tokens']) {
+    for (const table of ['agent_oauth_requests', 'agent_oauth_codes', 'agent_oauth_tokens', 'agent_oauth_sentinel']) {
       const rows = await sql<{ rls: boolean; anon: boolean; authed: boolean }>(
         `select c.relrowsecurity rls,
                 has_table_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,DELETE') anon,

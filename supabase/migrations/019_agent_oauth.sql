@@ -761,10 +761,11 @@ BEGIN
 
   DELETE FROM public.agent_oauth_codes WHERE expires_at < NOW() - INTERVAL '1 day';
   DELETE FROM public.agent_oauth_tokens WHERE expires_at < NOW() - INTERVAL '1 day';
-  -- A pending grant dies with its code (5 minutes); its row is kept a week so
-  -- the audit trail of the approval survives a little longer
+  -- A pending grant dies with its code (5 minutes), but its row carries the
+  -- secret of the "Not you?" link in the "Claude was connected" email, which
+  -- works for 30 days from creation: keep it exactly that long
   DELETE FROM public.agent_tokens
-  WHERE kind = 'oauth' AND oauth_status = 'pending' AND expires_at < NOW() - INTERVAL '7 days';
+  WHERE kind = 'oauth' AND oauth_status = 'pending' AND created_at < NOW() - INTERVAL '30 days';
   DELETE FROM public.agent_oauth_requests WHERE expires_at < NOW() - INTERVAL '1 day';
 END;
 $$;
