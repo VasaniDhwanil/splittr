@@ -11,7 +11,7 @@ export function ConnectEntryCard() {
   return (
     <Link
       href="/connect"
-      className="surface tactile group mt-16 flex items-center justify-between gap-4 rounded-2xl px-5 py-4 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="surface tactile group mt-10 flex items-center justify-between gap-4 rounded-2xl px-5 py-4 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <span className="min-w-0">
         <span className="block font-medium tracking-tight text-white">Use Splittr from Claude</span>
