@@ -1141,6 +1141,10 @@ Owner actions at launch, replacing §12 S12:
    `/api/mcp`, `/api/oauth/*`, `/.well-known/*`.
 4. Vercel Production env: `MCP_ENABLED=true`, `AGENT_TOKEN_PEPPER` (32+
    bytes), `MCP_OAUTH_ENABLED=true`. Nothing in Supabase's OAuth settings.
+5. In the Supabase dashboard (Authentication → Providers → Email) confirm the
+   email OTP expiry is 3600 seconds (the default). The magic-link email says
+   "The code and the link work for one hour"; if the expiry is shorter, change
+   the email text to match.
 
 ## 14. API contracts (backend ⇄ UI) for Part 2
 
@@ -1240,8 +1244,9 @@ option (WP9). Numbered for reference.
    redemption over the cap revokes the pending grant (`grant_limit`) and
    replaces nothing.
 8. **Grant expiry.** A pending grant expires with its code (5 minutes); at
-   redemption it becomes a 90 day grant. Pending grants are pruned a week
-   after expiring. Refresh tokens expire with the grant.
+   redemption it becomes a 90 day grant. Never-redeemed pending grants are
+   pruned 30 days after creation (the life of the "Not you?" link; a week
+   before the WP12 review, see 31). Refresh tokens expire with the grant.
 9. **Wrong-code accounting.** Approve checks the 24 hour lock first (also for
    the fresh sign-in path), then request validity, scopes, the cap, then the
    code. A missing or expired code is `code_required` and costs no attempt; a
@@ -1307,9 +1312,11 @@ Added by WP10 (`/api/mcp` accepts OAuth tokens; fixes from the WP9 report).
     failed-auth budget. The 401 for a leaked token carries no challenge (it is
     not a credential presented in a header). The scan runs whether or not
     OAuth is on (a lookup error before migration 019 is ignored).
-21. **The first token pair is derived from the code (amends A1 and 5).**
-    access = `spl_oat_` + HMAC(k, "at0|" + code), refresh = `spl_ort_` +
-    HMAC(k, "rt0|" + code), with the usual check suffix. `oauth_redeem_code`
+21. **The first token pair is derived from the code and the PKCE verifier
+    (amends A1 and 5; verifier added by WP12, see 28).**
+    access = `spl_oat_` + HMAC(k, "at0|" + code + "|" + code_verifier), refresh
+    = `spl_ort_` + HMAC(k, "rt0|" + code + "|" + code_verifier), with the usual
+    check suffix. `oauth_redeem_code`
     stores them with `parent_hash` = the code's hash. A second exchange of the
     same code that passes client, `redirect_uri` and PKCE is answered `ok`
     with the same pair (the response carries `replay: true`, audited as
@@ -1348,3 +1355,89 @@ Added by WP10 (`/api/mcp` accepts OAuth tokens; fixes from the WP9 report).
     with an admin-minted magic link (a fresh `otp` sign-in), so Claude Code
     needs no code and the hosted client needs the code read from the log; it
     creates and deletes one `oauth-e2e-*@example.test` user in the local database.
+
+Added by WP12 (fixes from the implementation review; see the table below).
+
+27. **`safeNext` resolves, it does not prefix-test.** The target is resolved
+    against a fixed base, must stay on that origin, and is refused if the raw
+    or percent-decoded value holds a control character or a backslash; the
+    result is `pathname + search + hash`. `/signin` and `/auth/callback` both
+    use it (the callback's private copy is gone). Consent's own sign-in links
+    are built from the validated request id and not from input.
+28. **Authorization codes carry a keyed check suffix.** A code is
+    `<43 base64url>_<8 check>` (52 characters), the check being the first 6
+    bytes of HMAC(k, "code|" + body), so a forged code is refused with no
+    database call, like a forged token. The first token pair also needs the
+    PKCE verifier (21). A retry with a wrong verifier fails the PKCE
+    comparison, gets `invalid_grant` and revokes nothing; the right verifier
+    recomputes the same pair.
+29. **The per-address failure throttle counts only malformed or forged
+    values** (a request that fails its form, client, grant type, resource or
+    shape/check tests; a code or token whose check suffix is wrong). A
+    well-formed, correctly keyed code or token that is unknown, used, expired
+    or revoked is never counted. Once an address is over 30 failures a minute,
+    only requests of that malformed kind are refused with 429; a well-formed,
+    keyed request still reaches the database (it is limited per grant, and
+    forging one needs the pepper). So junk from Anthropic's shared egress cannot
+    lock out real users. The same rule holds at `/api/oauth/revoke`.
+30. **Consent takeover ("Not you? Switch account").** `guardConsent`: when the
+    per-request binding cookie matches and the request is pending, has no
+    grant and is unexpired, a different signed-in account may take it over with
+    one compare-and-set on the owner it saw. The update clears `code_hmac`,
+    `code_expires_at` and `attempts`, so a code mailed to the previous account
+    cannot approve for the new one. Of several accounts racing for one request,
+    exactly one wins and the others get 404. Without the cookie nothing
+    changes (404). A first claim of an unowned request audits `request_created`
+    (see 33); a takeover audits `consent_account_switched`.
+31. **Pending grants live 30 days** (amends 8), matching the revoke link.
+32. **Sentinel row.** `agent_oauth_sentinel` holds one row, RLS on, no grants.
+    When a correctly keyed refresh token or code (at the token endpoint) or
+    access token (at `/api/mcp`) is not found, the app reads it: if it is
+    missing or the read fails the answer is 503 with `Retry-After: 5`, never
+    `invalid_grant` or 401. Against a free-tier database waking up with empty
+    results this keeps Claude from dropping a good connection. It does not
+    apply to forged values (they never reach the database) or to a revoked
+    grant (found, then refused).
+33. **Authorize writes.** `/oauth/authorize` is limited in the database too
+    (`oauth-authorize:ip:<ip>`, 30 per 10 minutes, `authorizeLimits.dbIp` and
+    `.windowSeconds` so tests can lower them) before the request row is
+    inserted, besides the in-memory 20 and the per-account 10. A request
+    created while signed out writes no audit row; `request_created` is written
+    when an account first claims it.
+34. **Revoking several grants of one account takes the account lock.**
+    `revoke_account_agent_tokens(user, reason, include_expired)` takes the
+    per-account advisory lock (the one approval and redemption use), then the
+    rows in id order, and returns the ids. Revoke-all and the "Not you?" link
+    use it (falling back to the plain update on a database without migration
+    019). `oauth_redeem_code` locks the new grant and the grants it replaces in
+    id order, after the advisory lock.
+35. **A limiter that cannot be asked is a 503.** At `/api/mcp` (per-token and
+    per-account daily) and the consent code route a `hitRateLimit` that reports
+    `unavailable` answers 503 with `Retry-After: 5`, not 429. `/oauth/authorize`
+    redirects with `temporarily_unavailable`, which is the OAuth form of the
+    same answer. (`create_bill`'s daily cap in `write-tools.ts` still treats it
+    as refused: not an OAuth route.)
+36. **`/api/oauth/revoke` audits every call**: `revoked_by_client` (as before),
+    `revoke_not_found` (unknown or already revoked), `revoke_wrong_client`
+    (another client's token, with that grant and account) and `revoke_malformed`
+    (forged or malformed token). `oauth_revoke_by_token` returns `wrong_client`
+    for the middle case; the endpoint still answers 200 to all of them.
+
+## Part 2 review (implementation)
+
+An independent reviewer found no way to obtain tokens without the owner's
+approval on the consent page. WP12 fixed the rest.
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| F1 open redirect after code sign-in (`/\t/evil.com`) | Medium | 27: `safeNext` resolves against a fixed origin, refuses control characters and backslashes; `/auth/callback` uses it |
+| F2 "Switch account" cannot work | Medium | 30: takeover by compare-and-set with the cookie, clears the emailed code |
+| F3 token throttle can lock out Claude's shared egress | Medium | 28, 29: keyed code suffix, only malformed or forged values counted; the same at revoke |
+| F4 first pair derived from the code alone | Low/Medium | 21, 28: derived from code and verifier |
+| F5 unauthenticated writes at `/oauth/authorize` | Low | 33: database limit before the insert; audit at claim time |
+| F6 empty results while the database wakes up look like `invalid_grant` | Low | 32: sentinel row, 503 when it is missing |
+| F7 revoke-all against redemption could deadlock | Low | 34: shared account lock, id order |
+| F8 "Not you?" link outlives the pending grant | Low | 8, 31: pending grants kept 30 days |
+| F9 limiter failure answered 429 | Low | 35 |
+| F10 email said the code works "for a few minutes" | Info | template text; owner action 5 in section 13 |
+| F11 revoke audited only successes (A11) | Low | 36 |
