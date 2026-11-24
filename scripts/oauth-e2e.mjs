@@ -272,7 +272,7 @@ async function connectAs({ label, clientId, redirectUri, loopback, page, user })
     check('the hosted redirect points at claude.ai/api/mcp/auth_callback', `${redirected.origin}${redirected.pathname}` === HOSTED_REDIRECT, redirected.toString());
   }
   const code = redirected.searchParams.get('code');
-  must('the redirect carries a code', /^[A-Za-z0-9_-]{43}$/.test(code ?? ''), redirected.toString());
+  must('the redirect carries a code', /^[A-Za-z0-9_-]{43}_[A-Za-z0-9_-]{8}$/.test(code ?? ''), redirected.toString());
   check('the redirect carries our state back', redirected.searchParams.get('state') === state);
   check('the redirect carries iss (RFC 9207)', redirected.searchParams.get('iss') === ISSUER);
 
