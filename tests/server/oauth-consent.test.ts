@@ -385,7 +385,7 @@ describe('POST .../approve: the hosted client', () => {
     expect(url.searchParams.get('state')).toBe('xyz');
     expect(url.searchParams.get('iss')).toBe('http://localhost:3199');
     const code = url.searchParams.get('code')!;
-    expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(code).toMatch(/^[A-Za-z0-9_-]{43}_[A-Za-z0-9_-]{8}$/);
 
     // the code is stored hashed, and exchanging it makes the grant live
     const { data: stored } = await db().from('agent_oauth_codes').select('scopes, client_id, grant_id').eq('hash', sha(code)).single();
