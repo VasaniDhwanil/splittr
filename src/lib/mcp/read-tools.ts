@@ -276,7 +276,7 @@ export const getBalances = defineTool({
       }
       return {
         label: `person #${index + 1}`,
-        untrusted_name: untrusted(name, NAME_MAX),
+        untrusted_name: untrusted(name, PARTICIPANT_NAME_MAX),
         direction: youOwe ? ('you_owe' as const) : ('owes_you' as const),
         amount: Math.abs(row.amount),
         ...(Object.keys(payWith).length > 0 ? { pay_with: payWith } : {}),
