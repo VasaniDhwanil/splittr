@@ -4,6 +4,9 @@ import { generateAgentToken } from '@/lib/agent-tokens';
 import { resetFailures } from '@/lib/oauth/throttle';
 import { billExists, insertProposal } from './helpers/agent';
 import { createUser, db } from './helpers/db';
+import { randomIp } from './helpers/oauth-server';
+import { generateOAuthTokenPair } from '@/lib/oauth/tokens';
+import { TEST_PEPPER } from './helpers/agent';
 import {
   CLAUDE_CODE_CLIENT_ID,
   HOSTED_CLIENT_ID,
@@ -62,8 +65,9 @@ describe('POST /api/oauth/revoke (RFC 7009)', () => {
       const res = await post({ token, client_id: CLAUDE_CODE_CLIENT_ID });
       expect(res.status, token).toBe(200);
     }
+    // forged values are answered without touching grants or tokens: the only database use is the audit row
     expect(rpc).not.toHaveBeenCalled();
-    expect(from).not.toHaveBeenCalled();
+    expect(new Set(from.mock.calls.map((c) => c[0]))).toEqual(new Set(['agent_audit_log']));
     vi.restoreAllMocks();
     // well-formed but unknown
     expect((await post({ token: generate().access, client_id: CLAUDE_CODE_CLIENT_ID })).status).toBe(200);
@@ -111,5 +115,39 @@ describe('POST /api/oauth/revoke (RFC 7009)', () => {
     expect((await post({ token: 'x', client_id: CLAUDE_CODE_CLIENT_ID })).status).toBe(503);
     off();
     restore = enableOAuth();
+  });
+});
+
+describe('every call is audited (A11)', () => {
+  const outcomes = async (ip: string) =>
+    ((await db().from('agent_audit_log').select('outcome, token_id, user_id').eq('ip', ip).order('id')).data ?? []).map((r) => r.outcome);
+
+  it('records revoked, not_found, wrong_client and malformed', async () => {
+    const user = await createUser('audit-rev');
+    const { pair, grantId } = await connect(user);
+    const ip = randomIp();
+    const as = (fields: Record<string, string>) => post(fields, { 'x-real-ip': ip });
+    await as({ token: 'junk', client_id: CLAUDE_CODE_CLIENT_ID });
+    await as({ token: generateOAuthTokenPair(TEST_PEPPER).access, client_id: CLAUDE_CODE_CLIENT_ID });
+    await as({ token: pair.access, client_id: HOSTED_CLIENT_ID });
+    expect((await grantRow(grantId)).revoked_at).toBeNull();
+    await as({ token: pair.access, client_id: CLAUDE_CODE_CLIENT_ID });
+    expect(await outcomes(ip)).toEqual(['revoke_malformed', 'revoke_not_found', 'revoke_wrong_client', 'revoked_by_client']);
+    const wrong = (await db().from('agent_audit_log').select('token_id, user_id').eq('ip', ip).eq('outcome', 'revoke_wrong_client').single()).data!;
+    expect(wrong).toEqual({ token_id: grantId, user_id: user.id });
+  });
+});
+
+describe('the per-address throttle counts only malformed or forged tokens (F3)', () => {
+  it('50 well-keyed unknown or revoked tokens never throttle; 30 forged ones do, and then only forged ones are refused', async () => {
+    const ip = randomIp();
+    const as = (token: string) => post({ token, client_id: CLAUDE_CODE_CLIENT_ID }, { 'x-real-ip': ip });
+    for (let i = 0; i < 50; i++) expect((await as(generateOAuthTokenPair(TEST_PEPPER).refresh)).status).toBe(200);
+    for (let i = 0; i < 30; i++) expect((await as('junk')).status).toBe(200);
+    expect((await as('junk')).status).toBe(429);
+    // a well-keyed token from the same address still gets through to the database
+    const { pair, grantId } = await connect(await createUser('rev-throttle'));
+    expect((await as(pair.access)).status).toBe(200);
+    expect((await grantRow(grantId)).revoked_at).not.toBeNull();
   });
 });

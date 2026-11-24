@@ -118,30 +118,34 @@ describe('derived successors', () => {
   });
 });
 
-describe('the first pair, derived from the code', () => {
-  const code = generateAuthorizationCode();
+describe('the first pair, derived from the code and the PKCE verifier', () => {
+  const code = generateAuthorizationCode(PEPPER);
+  const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
 
   it('is deterministic, valid, and of the right types', () => {
-    const a = deriveFirstPair(code, PEPPER);
-    expect(a).toEqual(deriveFirstPair(code, PEPPER));
+    const a = deriveFirstPair(code, verifier, PEPPER);
+    expect(a).toEqual(deriveFirstPair(code, verifier, PEPPER));
     expect(parseOAuthToken(a.access, PEPPER)).toBe('access');
     expect(parseOAuthToken(a.refresh, PEPPER)).toBe('refresh');
   });
 
-  it('differs per code, per pepper, and from every derived successor', () => {
-    const a = deriveFirstPair(code, PEPPER);
-    expect(deriveFirstPair(generateAuthorizationCode(), PEPPER).access).not.toBe(a.access);
-    expect(deriveFirstPair(code, OTHER).access).not.toBe(a.access);
-    // "at0|" is not "at|": the same string used as a refresh token yields something else
+  it('differs per code, per verifier, per pepper, and from every derived successor', () => {
+    const a = deriveFirstPair(code, verifier, PEPPER);
+    expect(deriveFirstPair(generateAuthorizationCode(PEPPER), verifier, PEPPER).access).not.toBe(a.access);
+    expect(deriveFirstPair(code, verifier + 'x', PEPPER).access).not.toBe(a.access);
+    expect(deriveFirstPair(code, verifier + 'x', PEPPER).refresh).not.toBe(a.refresh);
+    expect(deriveFirstPair(code, verifier, OTHER).access).not.toBe(a.access);
     expect(deriveSuccessors(code, PEPPER).access).not.toBe(a.access);
     expect(deriveSuccessors(code, PEPPER).refresh).not.toBe(a.refresh);
     expect(a.access.slice(8)).not.toBe(a.refresh.slice(8));
   });
 
-  it('does not contain the code', () => {
-    const a = deriveFirstPair(code, PEPPER);
-    expect(a.access).not.toContain(code);
-    expect(a.refresh).not.toContain(code);
+  it('cannot be computed from the code alone, and does not contain either', () => {
+    const a = deriveFirstPair(code, verifier, PEPPER);
+    for (const secret of [code, verifier]) {
+      expect(a.access).not.toContain(secret);
+      expect(a.refresh).not.toContain(secret);
+    }
   });
 });
 
@@ -152,13 +156,39 @@ describe('hashing and codes', () => {
     expect(hashOAuthSecret(access)).not.toBe(hashOAuthSecret(access.slice(8)));
   });
 
-  it('makes 256-bit codes', () => {
-    const code = generateAuthorizationCode();
-    expect(isWellFormedAuthorizationCode(code)).toBe(true);
-    expect(Buffer.from(code, 'base64url')).toHaveLength(32);
-    expect(isWellFormedAuthorizationCode(`${code}x`)).toBe(false);
-    expect(isWellFormedAuthorizationCode(generateOAuthTokenPair(PEPPER).access)).toBe(false);
-    expect(generateAuthorizationCode()).not.toBe(code);
+  it('makes 256-bit codes with a keyed check suffix', () => {
+    const code = generateAuthorizationCode(PEPPER);
+    expect(code).toMatch(/^[A-Za-z0-9_-]{43}_[A-Za-z0-9_-]{8}$/);
+    expect(isWellFormedAuthorizationCode(code, PEPPER)).toBe(true);
+    expect(Buffer.from(code.slice(0, 43), 'base64url')).toHaveLength(32);
+    expect(isWellFormedAuthorizationCode(`${code}x`, PEPPER)).toBe(false);
+    expect(isWellFormedAuthorizationCode(generateOAuthTokenPair(PEPPER).access, PEPPER)).toBe(false);
+    expect(generateAuthorizationCode(PEPPER)).not.toBe(code);
+  });
+
+  it('rejects a forged code: right shape, wrong check, another pepper, no pepper, bare body', () => {
+    const code = generateAuthorizationCode(PEPPER);
+    const body = code.slice(0, 43);
+    expect(isWellFormedAuthorizationCode(`${body}_AAAAAAAA`, PEPPER)).toBe(false);
+    expect(isWellFormedAuthorizationCode(code, OTHER)).toBe(false);
+    expect(isWellFormedAuthorizationCode(code, null)).toBe(false);
+    expect(isWellFormedAuthorizationCode(body, PEPPER)).toBe(false);
+    expect(isWellFormedAuthorizationCode(undefined, PEPPER)).toBe(false);
+  });
+
+  it('keeps the check suffix of a code apart from a token\'s: the type is part of the MAC', () => {
+    const code = generateAuthorizationCode(PEPPER);
+    const body = code.slice(0, 43);
+    const asAccess = `spl_oat_${code}`;
+    const asRefresh = `spl_ort_${code}`;
+    expect(parseOAuthToken(asAccess, PEPPER)).toBeNull();
+    expect(parseOAuthToken(asRefresh, PEPPER)).toBeNull();
+    // and a token's check is not a code's check
+    const tok = generateOAuthTokenPair(PEPPER).access;
+    const tokBody = tok.slice(8, 8 + 43);
+    const tokCheck = tok.slice(-8);
+    expect(isWellFormedAuthorizationCode(`${tokBody}_${tokCheck}`, PEPPER)).toBe(false);
+    expect(body).toHaveLength(43);
   });
 
   it('checks PKCE S256 against the RFC 7636 example', () => {

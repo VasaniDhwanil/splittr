@@ -48,14 +48,19 @@ function tokenResponse(pair: { access: string; refresh: string }, scopes: string
  */
 export async function POST(request: NextRequest) {
   const ip = requestIp(request);
-  // Failures before a grant is known count against the address
+  // Only a request whose own values are malformed or forged (shape, keyed
+  // check suffix) counts against the address, and only such a request is
+  // refused once the address is over the limit. A well-formed, correctly keyed
+  // code or token that is merely unknown, used, expired or revoked is never
+  // counted: many Claude users share one egress address, and a revoked
+  // connection retrying must not lock the others out.
   const early = (response: NextResponse) => {
+    if (overFailureLimit(ip)) return tooManyRequests(60);
     recordFailure(ip);
     return response;
   };
   try {
     if (!isOAuthEnabled() || !agentPepper()) return temporarilyUnavailable();
-    if (overFailureLimit(ip)) return tooManyRequests(60);
 
     const form = await readForm(request);
     if (!form.ok) {
@@ -108,7 +113,7 @@ export async function POST(request: NextRequest) {
         .eq('hash', codeHash)
         .maybeSingle();
       if (error) return temporarilyUnavailable();
-      if (!row) return early(tokenError('invalid_grant', 'The code is not valid.'));
+      if (!row) return tokenError('invalid_grant', 'The code is not valid.');
 
       const hit = await hitRateLimit(`oauth-token:grant:${row.grant_id}`, PER_GRANT_PER_MINUTE, 60);
       if (hit.unavailable) return temporarilyUnavailable();
@@ -120,8 +125,9 @@ export async function POST(request: NextRequest) {
       const verifierOk = verifyPkceS256(verifier, row.code_challenge);
       const bindingsOk = clientOk && redirectOk && verifierOk;
 
-      // Derived from the code, so a retried exchange (a lost response) gets the same pair
-      const pair = deriveFirstPair(code);
+      // Derived from the code and the verifier, so a retried exchange (a lost
+      // response, the same verifier) gets the same pair
+      const pair = deriveFirstPair(code, verifier);
       const { data, error: rpcError } = await db.rpc('oauth_redeem_code', {
         p_code_hash: codeHash,
         p_bindings_ok: bindingsOk,
@@ -169,7 +175,7 @@ export async function POST(request: NextRequest) {
       .eq('type', 'refresh')
       .maybeSingle();
     if (error) return temporarilyUnavailable();
-    if (!row) return early(tokenError('invalid_grant', 'The refresh token is not valid.'));
+    if (!row) return tokenError('invalid_grant', 'The refresh token is not valid.');
 
     const hit = await hitRateLimit(`oauth-token:grant:${row.grant_id}`, PER_GRANT_PER_MINUTE, 60);
     if (hit.unavailable) return temporarilyUnavailable();

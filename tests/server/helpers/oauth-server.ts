@@ -80,7 +80,7 @@ export interface ApproveArgs {
 }
 
 export async function callApprove(user: TestUser, req: SeedRequest, args: ApproveArgs = {}) {
-  const code = generateAuthorizationCode();
+  const code = generateAuthorizationCode(TEST_PEPPER);
   // The function itself refuses a hosted-client approval without an emailed code: unless a test says
   // otherwise, give the hosted client the code it needs
   const hostedDefault = req.clientId === HOSTED_CLIENT_ID && args.requireCode === undefined;
@@ -107,9 +107,9 @@ export async function callApprove(user: TestUser, req: SeedRequest, args: Approv
   return { result: data as { status: string; grant_id?: string; attempts_left?: number; replaces?: number }, code };
 }
 
-export async function callRedeem(code: string, bindingsOk = true, pairOverride?: { access: string; refresh: string }) {
-  // Derived from the code, as the token endpoint does
-  const pair = pairOverride ?? deriveFirstPair(code, TEST_PEPPER);
+export async function callRedeem(code: string, bindingsOk = true, pairOverride?: { access: string; refresh: string }, verifier = VERIFIER) {
+  // Derived from the code and the verifier, as the token endpoint does
+  const pair = pairOverride ?? deriveFirstPair(code, verifier, TEST_PEPPER);
   const { data, error } = await db().rpc('oauth_redeem_code', {
     p_code_hash: sha(code),
     p_bindings_ok: bindingsOk,

@@ -659,8 +659,12 @@ BEGIN
     RETURN jsonb_build_object('status', 'not_found');
   END IF;
   SELECT * INTO g FROM public.agent_tokens WHERE id = peek.grant_id FOR UPDATE;
-  IF NOT FOUND OR g.kind <> 'oauth' OR g.oauth_client_id IS DISTINCT FROM p_client_id THEN
+  IF NOT FOUND OR g.kind <> 'oauth' THEN
     RETURN jsonb_build_object('status', 'not_found');
+  END IF;
+  -- Another client's token: nothing changes (the caller audits it)
+  IF g.oauth_client_id IS DISTINCT FROM p_client_id THEN
+    RETURN jsonb_build_object('status', 'wrong_client', 'grant_id', g.id, 'user_id', g.user_id);
   END IF;
   IF g.revoked_at IS NOT NULL THEN
     RETURN jsonb_build_object('status', 'not_found');

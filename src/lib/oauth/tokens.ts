@@ -12,7 +12,7 @@
  * SHA-256 of the full string, prefix included, is ever stored.
  *
  * Every pair is derived, never random: the first from the authorization code
- * being redeemed, each later one from the refresh token being used. A retried
+ * being redeemed and its PKCE verifier, each later one from the refresh token being used. A retried
  * code exchange or refresh can then return the same pair without the server
  * holding any plaintext.
  */
@@ -23,7 +23,7 @@ export type OAuthTokenType = 'access' | 'refresh';
 
 const PREFIX: Record<OAuthTokenType, string> = { access: 'spl_oat_', refresh: 'spl_ort_' };
 const SHAPE = /^(spl_oat_|spl_ort_)([A-Za-z0-9_-]{43})_([A-Za-z0-9_-]{8})$/;
-const CODE_SHAPE = /^[A-Za-z0-9_-]{43}$/;
+const CODE_SHAPE = /^([A-Za-z0-9_-]{43})_([A-Za-z0-9_-]{8})$/;
 
 /** Throws when the pepper is missing or short: callers check isOAuthEnabled() first. */
 function derivationKey(pepper: string | null): Buffer {
@@ -31,8 +31,11 @@ function derivationKey(pepper: string | null): Buffer {
   return createHmac('sha256', pepper).update('oauth-token-derivation').digest();
 }
 
-function checkSuffix(key: Buffer, type: OAuthTokenType, body: string): string {
-  return createHmac('sha256', key).update(`${type === 'access' ? 'at' : 'rt'}|${body}`).digest().subarray(0, 6).toString('base64url');
+type CheckedKind = OAuthTokenType | 'code';
+const CHECK_TAG: Record<CheckedKind, string> = { access: 'at', refresh: 'rt', code: 'code' };
+
+function checkSuffix(key: Buffer, type: CheckedKind, body: string): string {
+  return createHmac('sha256', key).update(`${CHECK_TAG[type]}|${body}`).digest().subarray(0, 6).toString('base64url');
 }
 
 function format(key: Buffer, type: OAuthTokenType, rawBody: Buffer): string {
@@ -45,13 +48,24 @@ export function hashOAuthSecret(secret: string): string {
   return createHash('sha256').update(secret).digest('hex');
 }
 
-/** A single-use authorization code: 256 random bits. */
-export function generateAuthorizationCode(): string {
-  return randomBytes(32).toString('base64url');
+/**
+ * A single-use authorization code: 256 random bits and the same kind of keyed
+ * check suffix as the tokens (type "code" in the MAC), so a forged code is
+ * rejected before any database call.
+ */
+export function generateAuthorizationCode(pepper: string | null = agentPepper()): string {
+  const body = randomBytes(32).toString('base64url');
+  return `${body}_${checkSuffix(derivationKey(pepper), 'code', body)}`;
 }
 
-export function isWellFormedAuthorizationCode(value: unknown): value is string {
-  return typeof value === 'string' && CODE_SHAPE.test(value);
+/** Shape and check suffix, no database. With no pepper nothing validates. */
+export function isWellFormedAuthorizationCode(value: unknown, pepper: string | null = agentPepper()): value is string {
+  if (typeof value !== 'string' || !pepper) return false;
+  const match = CODE_SHAPE.exec(value);
+  if (!match) return false;
+  const expected = Buffer.from(checkSuffix(derivationKey(pepper), 'code', match[1]));
+  const given = Buffer.from(match[2]);
+  return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
 export interface OAuthTokenPair {
@@ -66,13 +80,15 @@ export function generateOAuthTokenPair(pepper: string | null = agentPepper()): O
 }
 
 /**
- * The first pair of a grant, from the authorization code: HMAC(k, "at0|" +
- * code) and HMAC(k, "rt0|" + code). The "0" keeps it apart from successors.
- * A retried exchange of the same code recomputes the same pair.
+ * The first pair of a grant, from the authorization code AND the PKCE
+ * verifier: HMAC(k, "at0|" + code + "|" + verifier) and the "rt0|" twin. The
+ * verifier is what only the client holds, so a logged code plus the pepper is
+ * not enough to compute live tokens. A retried exchange resends the same
+ * verifier (the only one that passes PKCE) and recomputes the same pair.
  */
-export function deriveFirstPair(code: string, pepper: string | null = agentPepper()): OAuthTokenPair {
+export function deriveFirstPair(code: string, verifier: string, pepper: string | null = agentPepper()): OAuthTokenPair {
   const key = derivationKey(pepper);
-  const body = (tag: 'at0' | 'rt0') => createHmac('sha256', key).update(`${tag}|${code}`).digest();
+  const body = (tag: 'at0' | 'rt0') => createHmac('sha256', key).update(`${tag}|${code}|${verifier}`).digest();
   return { access: format(key, 'access', body('at0')), refresh: format(key, 'refresh', body('rt0')) };
 }
 

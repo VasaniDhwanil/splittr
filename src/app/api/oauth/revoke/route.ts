@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { requestIp } from '@/lib/agent-access';
+import { auditAgentCall, requestIp } from '@/lib/agent-access';
 import { agentPepper } from '@/lib/agent-tokens';
 import { findClient } from '@/lib/oauth/clients';
 import { isOAuthEnabled } from '@/lib/oauth/config';
@@ -19,18 +19,20 @@ const ok = () => new NextResponse(null, { status: 200, headers: NO_STORE });
  */
 export async function POST(request: NextRequest) {
   const ip = requestIp(request);
+  // As at the token endpoint: only a value that fails its shape or keyed check
+  // counts against the address, and only such a request is refused over the limit
+  const tooMany = () =>
+    NextResponse.json(
+      { error: 'temporarily_unavailable', error_description: 'Too many requests. Try again shortly.' },
+      { status: 429, headers: { ...NO_STORE, 'Retry-After': '60' } }
+    );
   const early = (response: NextResponse) => {
+    if (overFailureLimit(ip)) return tooMany();
     recordFailure(ip);
     return response;
   };
   try {
     if (!isOAuthEnabled() || !agentPepper()) return temporarilyUnavailable();
-    if (overFailureLimit(ip)) {
-      return NextResponse.json(
-        { error: 'temporarily_unavailable', error_description: 'Too many requests. Try again shortly.' },
-        { status: 429, headers: { ...NO_STORE, 'Retry-After': '60' } }
-      );
-    }
 
     const form = await readForm(request);
     if (!form.ok) {
@@ -51,7 +53,12 @@ export async function POST(request: NextRequest) {
 
     // token_type_hint is only a hint: either type revokes the grant. Forged
     // or foreign strings never reach the database.
-    if (parseOAuthToken(value) === null) return ok();
+    if (parseOAuthToken(value) === null) {
+      if (overFailureLimit(ip)) return tooMany();
+      recordFailure(ip);
+      await auditAgentCall({ tokenId: null, userId: null, tool: 'oauth', outcome: 'revoke_malformed', ip });
+      return ok();
+    }
 
     const { data, error } = await createAdminClient().rpc('oauth_revoke_by_token', {
       p_token_hash: hashOAuthSecret(value),
@@ -63,7 +70,16 @@ export async function POST(request: NextRequest) {
       await afterGrantRevoked({ kind: 'revoked_by_client', grantId: data.grant_id, userId: data.user_id, grantName: client.label, ip });
       return ok();
     }
-    if (data.status === 'not_found') return ok();
+    if (data.status === 'not_found' || data.status === 'wrong_client') {
+      await auditAgentCall({
+        tokenId: data.status === 'wrong_client' ? data.grant_id : null,
+        userId: data.status === 'wrong_client' ? data.user_id : null,
+        tool: 'oauth',
+        outcome: data.status === 'wrong_client' ? 'revoke_wrong_client' : 'revoke_not_found',
+        ip,
+      });
+      return ok();
+    }
     return temporarilyUnavailable();
   } catch (error) {
     console.error('Error in oauth revoke:', error instanceof Error ? error.message : 'unknown');

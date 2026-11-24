@@ -16,7 +16,9 @@ vi.mock('@/lib/email', async (importOriginal) => {
 import { POST as token } from '@/app/api/oauth/token/route';
 import { generateAgentToken } from '@/lib/agent-tokens';
 import { resetFailures } from '@/lib/oauth/throttle';
-import { deriveFirstPair, generateOAuthTokenPair, parseOAuthToken } from '@/lib/oauth/tokens';
+import { randomBytes } from 'node:crypto';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { deriveFirstPair, generateAuthorizationCode, generateOAuthTokenPair, parseOAuthToken } from '@/lib/oauth/tokens';
 import { rpcBody, send } from './helpers/mcp';
 import { billExists, insertProposal } from './helpers/agent';
 import { createUser, db, sql } from './helpers/db';
@@ -245,7 +247,7 @@ describe('authorization_code', () => {
     const user = await createUser('derived');
     const { code } = await approved(user);
     const first = await json(await exchange(code));
-    const pair = deriveFirstPair(code, TEST_PEPPER);
+    const pair = deriveFirstPair(code, VERIFIER, TEST_PEPPER);
     expect(first.access_token).toBe(pair.access);
     expect(first.refresh_token).toBe(pair.refresh);
   });
@@ -596,5 +598,92 @@ describe('rate limits', () => {
       const res = await token(formRequest('/api/oauth/token', { grant_type: 'refresh_token', client_id: CLAUDE_CODE_CLIENT_ID, refresh_token: pair.refresh }, { 'x-real-ip': ip }));
       expect(res.status).toBe(200);
     }
+  });
+});
+
+describe('a forged or junk value never costs a database call, nor an honest client its access (F3)', () => {
+  const forgedCode = () => `${randomBytes(32).toString('base64url')}_AAAAAAAA`;
+  const spyOnDatabase = () => {
+    const admin = createAdminClient();
+    return [vi.spyOn(admin, 'from'), vi.spyOn(admin, 'rpc')] as const;
+  };
+
+  it('rejects a code with a bad check suffix, a forged refresh token and an access token as refresh with zero queries', async () => {
+    const spies = spyOnDatabase();
+    const forgedRefresh = `spl_ort_${randomBytes(32).toString('base64url')}_AAAAAAAA`;
+    const wellKeyedAccess = generateOAuthTokenPair(TEST_PEPPER).access;
+    expect((await json(await exchange(forgedCode()))).error).toBe('invalid_grant');
+    expect((await json(await refresh(forgedRefresh))).error).toBe('invalid_grant');
+    expect((await json(await refresh(wellKeyedAccess))).error).toBe('invalid_grant');
+    expect((await json(await exchange(randomBytes(32).toString('base64url')))).error).toBe('invalid_grant');
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('50 junk codes from one address do not stop a valid refresh from that address', async () => {
+    const user = await createUser('junkcodes');
+    const { pair } = await connect(user);
+    const ip = randomIp();
+    for (let i = 0; i < 50; i++) {
+      const res = await token(
+        formRequest('/api/oauth/token', { grant_type: 'authorization_code', client_id: CLAUDE_CODE_CLIENT_ID, code: forgedCode(), code_verifier: VERIFIER }, { 'x-real-ip': ip })
+      );
+      expect([400, 429]).toContain(res.status);
+    }
+    const res = await token(formRequest('/api/oauth/token', { grant_type: 'refresh_token', client_id: CLAUDE_CODE_CLIENT_ID, refresh_token: pair.refresh }, { 'x-real-ip': ip }));
+    expect(res.status).toBe(200);
+  });
+
+  it('50 refreshes of revoked tokens from one address do not throttle a valid code exchange from it', async () => {
+    const user = await createUser('revokedrefresh');
+    const dead = await connect(user);
+    await db().from('agent_tokens').update({ revoked_at: new Date().toISOString(), revoked_reason: 'test' }).eq('id', dead.grantId);
+    const ip = randomIp();
+    for (let i = 0; i < 50; i++) {
+      const res = await token(formRequest('/api/oauth/token', { grant_type: 'refresh_token', client_id: CLAUDE_CODE_CLIENT_ID, refresh_token: dead.pair.refresh }, { 'x-real-ip': ip }));
+      expect(res.status).toBe(400);
+      expect((await json(res)).error).toBe('invalid_grant');
+    }
+    const { code } = await approved(user);
+    const res = await token(
+      formRequest('/api/oauth/token', { grant_type: 'authorization_code', client_id: CLAUDE_CODE_CLIENT_ID, code, code_verifier: VERIFIER }, { 'x-real-ip': ip })
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('does not count well-formed, correctly keyed codes that are unknown or already used', async () => {
+    const user = await createUser('unknowncodes');
+    const ip = randomIp();
+    for (let i = 0; i < 40; i++) {
+      const res = await token(
+        formRequest('/api/oauth/token', { grant_type: 'authorization_code', client_id: CLAUDE_CODE_CLIENT_ID, code: generateAuthorizationCode(TEST_PEPPER), code_verifier: VERIFIER }, { 'x-real-ip': ip })
+      );
+      expect(res.status).toBe(400);
+    }
+    const { code } = await approved(user);
+    expect((await token(formRequest('/api/oauth/token', { grant_type: 'authorization_code', client_id: CLAUDE_CODE_CLIENT_ID, code, code_verifier: VERIFIER }, { 'x-real-ip': ip }))).status).toBe(200);
+  });
+});
+
+describe('the first pair needs the verifier (F4)', () => {
+  it('a retried exchange with a wrong verifier gets no tokens and does not revoke the grant; the right one gets the same pair', async () => {
+    const user = await createUser('verifier');
+    const { code, grantId } = await approved(user);
+    const first = await json(await exchange(code));
+    const wrong = await exchange(code, { code_verifier: 'A'.repeat(43) });
+    expect(wrong.status).toBe(400);
+    const body = await json(wrong);
+    expect(body.error).toBe('invalid_grant');
+    expect(body.access_token).toBeUndefined();
+    expect(await grantRow(grantId)).toMatchObject({ revoked_at: null, oauth_status: 'live' });
+    const again = await exchange(code);
+    expect(again.status).toBe(200);
+    expect(await json(again)).toEqual(first);
+  });
+
+  it('cannot be computed from the code alone', async () => {
+    const user = await createUser('verifier2');
+    const { code } = await approved(user);
+    const first = await json(await exchange(code));
+    expect(deriveFirstPair(code, 'A'.repeat(43), TEST_PEPPER).access).not.toBe(first.access_token);
   });
 });
