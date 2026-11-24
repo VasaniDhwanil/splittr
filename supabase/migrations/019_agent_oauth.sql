@@ -479,6 +479,12 @@ BEGIN
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtextextended('agent_mint:' || owner::TEXT, 0));
+  -- Every grant this redemption may write (the new one and those it replaces),
+  -- locked in id order before anything is changed
+  PERFORM 1 FROM public.agent_tokens
+  WHERE id = peek.grant_id OR id = ANY (peek.replace_grant_ids)
+  ORDER BY id
+  FOR UPDATE;
   SELECT * INTO g FROM public.agent_tokens WHERE id = peek.grant_id FOR UPDATE;
   IF NOT FOUND THEN
     RETURN jsonb_build_object('status', 'not_found');
@@ -692,6 +698,48 @@ $$;
 
 REVOKE ALL ON FUNCTION public.oauth_revoke_by_token(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.oauth_revoke_by_token(TEXT, TEXT) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- Revoking several of an account's grants at once (revoke-all, the "Not you?"
+-- link). Takes the same per-account advisory lock as approval and redemption,
+-- then the grant rows in id order, so it can never deadlock with a redemption
+-- that is replacing grants of the same account. Returns the ids it revoked.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.revoke_account_agent_tokens(
+  p_user_id UUID,
+  p_reason TEXT,
+  p_include_expired BOOLEAN
+)
+RETURNS UUID[]
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  ids UUID[];
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended('agent_mint:' || p_user_id::TEXT, 0));
+
+  PERFORM 1 FROM public.agent_tokens
+  WHERE user_id = p_user_id AND revoked_at IS NULL
+    AND (p_include_expired OR expires_at > NOW())
+  ORDER BY id
+  FOR UPDATE;
+
+  WITH revoked AS (
+    UPDATE public.agent_tokens
+    SET revoked_at = NOW(), revoked_reason = p_reason
+    WHERE user_id = p_user_id AND revoked_at IS NULL
+      AND (p_include_expired OR expires_at > NOW())
+    RETURNING id
+  )
+  SELECT COALESCE(array_agg(id), '{}') INTO ids FROM revoked;
+  RETURN ids;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.revoke_account_agent_tokens(UUID, TEXT, BOOLEAN) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.revoke_account_agent_tokens(UUID, TEXT, BOOLEAN) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- Housekeeping: the 017 jobs plus expired requests, codes, tokens and grants

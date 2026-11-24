@@ -502,7 +502,7 @@ describe('oauth_revoke_by_token and the revoke trigger', () => {
     const user = await createUser('rev2');
     const { grantId, pair } = await connect(user);
     const wrongClient = await db().rpc('oauth_revoke_by_token', { p_token_hash: sha(pair.access), p_client_id: HOSTED_CLIENT_ID });
-    expect(wrongClient.data.status).toBe('not_found');
+    expect(wrongClient.data.status).toBe('wrong_client');
     const unknown = await db().rpc('oauth_revoke_by_token', { p_token_hash: sha('nope'), p_client_id: CLAUDE_CODE_CLIENT_ID });
     expect(unknown.data.status).toBe('not_found');
     expect((await grantRow(grantId)).revoked_at).toBeNull();

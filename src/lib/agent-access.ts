@@ -181,3 +181,32 @@ export async function clearMintLock(userId: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Revokes every unrevoked token (personal and OAuth) of an account in one
+ * step, under the account's advisory lock (migration 019's
+ * revoke_account_agent_tokens). Before that migration the function does not
+ * exist: fall back to the plain update, which is all there was to deadlock
+ * with then (no OAuth redemptions).
+ */
+export async function revokeAccountTokens(
+  userId: string,
+  reason: string,
+  includeExpired: boolean
+): Promise<{ ids: string[] } | { error: string | undefined }> {
+  const db = createAdminClient();
+  const { data, error } = await db.rpc('revoke_account_agent_tokens', {
+    p_user_id: userId,
+    p_reason: reason,
+    p_include_expired: includeExpired,
+  });
+  if (!error) return { ids: (data ?? []) as string[] };
+  if (error.code !== 'PGRST202' && error.code !== '42883') return { error: error.code };
+
+  const now = new Date().toISOString();
+  let query = db.from('agent_tokens').update({ revoked_at: now, revoked_reason: reason }).eq('user_id', userId).is('revoked_at', null);
+  if (!includeExpired) query = query.gt('expires_at', now);
+  const { data: rows, error: updateError } = await query.select('id');
+  if (updateError) return { error: updateError.code };
+  return { ids: (rows ?? []).map((row) => row.id as string) };
+}

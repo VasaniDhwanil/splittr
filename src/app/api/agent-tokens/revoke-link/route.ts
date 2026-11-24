@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { hashAgentToken } from '@/lib/agent-tokens';
-import { guardAgentOrigin, notFound } from '@/lib/agent-access';
+import { guardAgentOrigin, notFound, revokeAccountTokens } from '@/lib/agent-access';
 import { deleteReplacedGrantProposals, deleteUnapprovedProposals } from '@/lib/agent-bills';
 
 const SECRET = /^[A-Za-z0-9_-]{43}$/;
@@ -35,19 +35,15 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     if (!owner || Date.now() - Date.parse(owner.created_at) > LINK_LIFETIME_MS) return notFound();
 
-    const { data, error } = await db
-      .from('agent_tokens')
-      .update({ revoked_at: new Date().toISOString(), revoked_reason: 'revoke_link' })
-      .eq('user_id', owner.user_id)
-      .is('revoked_at', null)
-      .select('id');
-    if (error) {
-      console.error('agent-tokens revoke-link failed:', error.code);
+    const revoked = await revokeAccountTokens(owner.user_id, 'revoke_link', true);
+    if ('error' in revoked) {
+      console.error('agent-tokens revoke-link failed:', revoked.error);
       return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
-    await deleteUnapprovedProposals((data ?? []).map((row) => row.id));
+    const data = revoked.ids.map((id) => ({ id }));
+    await deleteUnapprovedProposals(data.map((row) => row.id));
     await deleteReplacedGrantProposals(owner.user_id);
-    return NextResponse.json({ revoked: data?.length ?? 0 });
+    return NextResponse.json({ revoked: data.length });
   } catch (error) {
     console.error('Error in agent-tokens revoke-link:', error instanceof Error ? error.message : 'unknown');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
