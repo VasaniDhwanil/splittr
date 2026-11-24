@@ -294,7 +294,11 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
 
     await touchAgentToken(actor.tokenId, ip);
 
+    // A limiter that could not be asked says nothing about the caller: 503, never 429
     const limit = await hitRateLimit(`mcp:${actor.tokenId}`, CALLS_PER_MINUTE, 60);
+    if (limit.unavailable) {
+      return respond(503, -32003, UNAVAILABLE_MESSAGE, { reason: 'unavailable', headers: { 'Retry-After': '5' } });
+    }
     if (!limit.allowed) {
       return respond(429, -32002, 'Too many requests. This token may make 60 calls a minute.', {
         reason: 'rate_limited',
@@ -303,6 +307,9 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
     }
 
     const daily = await hitRateLimit(`mcp-day:${actor.userId}`, MCP_LIMITS.callsPerDay, 86400);
+    if (daily.unavailable) {
+      return respond(503, -32003, UNAVAILABLE_MESSAGE, { reason: 'unavailable', headers: { 'Retry-After': '5' } });
+    }
     if (!daily.allowed) {
       return respond(429, -32002, 'The daily limit of calls for this account was reached. Try again tomorrow.', {
         reason: 'daily_limit',

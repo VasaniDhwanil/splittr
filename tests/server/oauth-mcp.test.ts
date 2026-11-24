@@ -370,3 +370,30 @@ describe('a refresh token at /api/mcp', () => {
     expect((await grantRow(grantId)).revoked_at).toBeNull();
   });
 });
+
+describe('a limiter that cannot be asked is a 503, not a 429 (F9)', () => {
+  const failLimiter = (which: 'first' | 'daily') => {
+    const admin = db();
+    const real = admin.rpc.bind(admin);
+    let seen = 0;
+    vi.spyOn(admin, 'rpc').mockImplementation(((fn: string, args?: unknown) => {
+      if (fn === 'agent_rate_limit') {
+        seen++;
+        if (which === 'first' || seen === 2) return Promise.resolve({ data: null, error: { message: 'down', code: '57P01', details: '', hint: '' } });
+      }
+      return real(fn, args as never);
+    }) as never);
+  };
+
+  for (const which of ['first', 'daily'] as const) {
+    it(`answers 503 with Retry-After: 5 when the ${which === 'first' ? 'per-token' : 'daily'} limiter fails`, async () => {
+      const { pair } = await connect(user);
+      failLimiter(which);
+      const res = await send(rpcBody('tools/list'), { token: pair.access });
+      expect(res.status).toBe(503);
+      expect(res.headers.get('retry-after')).toBe('5');
+      vi.restoreAllMocks();
+      expect((await send(rpcBody('tools/list'), { token: pair.access })).status).toBe(200);
+    });
+  }
+});

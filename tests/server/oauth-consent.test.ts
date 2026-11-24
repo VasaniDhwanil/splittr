@@ -909,3 +909,21 @@ describe('"Not you? Switch account"', () => {
     }
   });
 });
+
+describe('the code limiter cannot be asked (F9)', () => {
+  it('POST .../code answers 503 with Retry-After: 5, not 429, and sends nothing', async () => {
+    const user = await createUser('code-limiter');
+    signInAs(user);
+    const req = await hostedRequest(user);
+    const real = db().rpc.bind(db());
+    vi.spyOn(db(), 'rpc').mockImplementation(((fn: string, args?: unknown) =>
+      fn === 'agent_rate_limit'
+        ? Promise.resolve({ data: null, error: { message: 'down', code: '57P01', details: '', hint: '' } })
+        : real(fn, args as never)) as never);
+    const res = await call(sendCode, req, 'POST');
+    vi.restoreAllMocks();
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('5');
+    expect(mail.sent).toHaveLength(0);
+  });
+});

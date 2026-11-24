@@ -37,6 +37,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const hit = await hitRateLimit(`oauth_code:hour:${user.id}`, 3, 3600);
+    if (hit.unavailable) {
+      return noStore(
+        NextResponse.json({ error: 'Try again shortly.', code: 'unavailable' }, { status: 503, headers: { 'Retry-After': '5' } })
+      );
+    }
     if (!hit.allowed) {
       return noStore(
         NextResponse.json(
