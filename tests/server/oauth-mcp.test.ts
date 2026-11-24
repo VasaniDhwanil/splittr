@@ -397,3 +397,27 @@ describe('a limiter that cannot be asked is a 503, not a 429 (F9)', () => {
     });
   }
 });
+
+describe('the sentinel row at /api/mcp (F6)', () => {
+  afterEach(async () => {
+    await db().from('agent_oauth_sentinel').upsert({ id: 1 });
+  });
+
+  it('a well-keyed access token that is not found is a 503 with Retry-After without the sentinel, and a 401 with it', async () => {
+    const unknown = generateOAuthTokenPair(TEST_PEPPER).access;
+    await db().from('agent_oauth_sentinel').delete().eq('id', 1);
+    const down = await send(rpcBody('tools/list'), { token: unknown });
+    expect(down.status).toBe(503);
+    expect(down.headers.get('retry-after')).toBe('5');
+    await db().from('agent_oauth_sentinel').upsert({ id: 1 });
+    const up = await send(rpcBody('tools/list'), { token: unknown });
+    expect(up.status).toBe(401);
+    expect(up.headers.get('www-authenticate')).toBe(CHALLENGE_INVALID);
+  });
+
+  it('a real token keeps working while the sentinel is missing', async () => {
+    const { pair } = await connect(user);
+    await db().from('agent_oauth_sentinel').delete().eq('id', 1);
+    expect((await send(rpcBody('tools/list'), { token: pair.access })).status).toBe(200);
+  });
+});

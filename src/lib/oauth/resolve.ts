@@ -5,6 +5,7 @@
  */
 import type { Actor } from '@/lib/agent-access';
 import type { AgentScope } from '@/lib/agent-tokens';
+import { sentinelIntact } from '@/lib/oauth/sentinel';
 import { hashOAuthSecret, parseOAuthToken } from '@/lib/oauth/tokens';
 import { createAdminClient } from '@/lib/supabase/admin';
 
@@ -55,7 +56,8 @@ export async function resolveOAuthAccessToken(token: unknown): Promise<OAuthReso
   } catch {
     return { ok: false, reason: 'unavailable' };
   }
-  if (!data) return { ok: false, reason: 'unknown' };
+  // Not found is only believed while the database answers like itself (sentinel)
+  if (!data) return (await sentinelIntact()) ? { ok: false, reason: 'unknown' } : { ok: false, reason: 'unavailable' };
 
   const grant = Array.isArray(data.grant) ? data.grant[0] : data.grant;
   if (data.type !== 'access' || !grant || grant.kind !== 'oauth') return { ok: false, reason: 'unknown' };

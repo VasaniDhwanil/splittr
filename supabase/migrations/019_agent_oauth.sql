@@ -135,6 +135,22 @@ ALTER TABLE public.agent_oauth_tokens ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.agent_oauth_tokens FROM PUBLIC, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Sentinel: one row that is always there. On the free tier a database that is
+-- waking up can answer with empty results instead of errors; a refresh in that
+-- window would look like "token not found" and Claude would drop the
+-- connection for good (invalid_grant). When a correctly keyed token or code is
+-- not found, the app reads this row: if it is missing (or the read fails) the
+-- answer is 503 with Retry-After, not invalid_grant.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.agent_oauth_sentinel (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+INSERT INTO public.agent_oauth_sentinel (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+ALTER TABLE public.agent_oauth_sentinel ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.agent_oauth_sentinel FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Revoking a grant removes its codes and tokens (the liveness join at
 -- /api/mcp is the guarantee; this is cleanup and a second layer)
 -- ---------------------------------------------------------------------------

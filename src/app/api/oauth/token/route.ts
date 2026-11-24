@@ -6,6 +6,7 @@ import { findClient } from '@/lib/oauth/clients';
 import { canonicalResource } from '@/lib/oauth/authorize';
 import { isOAuthEnabled } from '@/lib/oauth/config';
 import { afterGrantRevoked } from '@/lib/oauth/grants';
+import { sentinelIntact } from '@/lib/oauth/sentinel';
 import { NO_STORE, readForm, temporarilyUnavailable, tokenError } from '@/lib/oauth/http';
 import { overFailureLimit, recordFailure } from '@/lib/oauth/throttle';
 import {
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
         .eq('hash', codeHash)
         .maybeSingle();
       if (error) return temporarilyUnavailable();
-      if (!row) return tokenError('invalid_grant', 'The code is not valid.');
+      if (!row) return (await sentinelIntact()) ? tokenError('invalid_grant', 'The code is not valid.') : temporarilyUnavailable();
 
       const hit = await hitRateLimit(`oauth-token:grant:${row.grant_id}`, PER_GRANT_PER_MINUTE, 60);
       if (hit.unavailable) return temporarilyUnavailable();
@@ -152,9 +153,10 @@ export async function POST(request: NextRequest) {
         case 'grant_limit':
           await auditAgentCall({ tokenId: data.grant_id, userId: data.user_id, tool: 'oauth', outcome: 'grant_limit', ip });
           return tokenError('invalid_grant', 'The code is not valid.');
+        case 'not_found':
+          return (await sentinelIntact()) ? tokenError('invalid_grant', 'The code is not valid.') : temporarilyUnavailable();
         case 'invalid':
         case 'expired':
-        case 'not_found':
           return tokenError('invalid_grant', 'The code is not valid.');
         default:
           return temporarilyUnavailable();
@@ -175,7 +177,7 @@ export async function POST(request: NextRequest) {
       .eq('type', 'refresh')
       .maybeSingle();
     if (error) return temporarilyUnavailable();
-    if (!row) return tokenError('invalid_grant', 'The refresh token is not valid.');
+    if (!row) return (await sentinelIntact()) ? tokenError('invalid_grant', 'The refresh token is not valid.') : temporarilyUnavailable();
 
     const hit = await hitRateLimit(`oauth-token:grant:${row.grant_id}`, PER_GRANT_PER_MINUTE, 60);
     if (hit.unavailable) return temporarilyUnavailable();
@@ -210,6 +212,7 @@ export async function POST(request: NextRequest) {
         });
         return tokenError('invalid_grant', 'The refresh token was already used.');
       case 'not_found':
+        return (await sentinelIntact()) ? tokenError('invalid_grant', 'The refresh token is not valid.') : temporarilyUnavailable();
       case 'revoked':
       case 'expired':
       case 'client_mismatch':

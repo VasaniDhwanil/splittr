@@ -687,3 +687,46 @@ describe('the first pair needs the verifier (F4)', () => {
     expect(deriveFirstPair(code, 'A'.repeat(43), TEST_PEPPER).access).not.toBe(first.access_token);
   });
 });
+
+describe('the sentinel row: "not found" is believed only while the database answers like itself (F6)', () => {
+  const removeSentinel = () => sql(`delete from public.agent_oauth_sentinel`);
+  const restoreSentinel = () => sql(`insert into public.agent_oauth_sentinel (id) values (1) on conflict do nothing`);
+  afterEach(restoreSentinel);
+
+  it('has exactly one row, readable only through the service role', async () => {
+    expect(await sql(`select id from public.agent_oauth_sentinel`)).toEqual([{ id: 1 }]);
+    expect((await sql(`select relrowsecurity from pg_class where oid = 'public.agent_oauth_sentinel'::regclass`))[0]).toEqual({ relrowsecurity: true });
+    expect(await sql(`select has_table_privilege('anon', 'public.agent_oauth_sentinel', 'select') a, has_table_privilege('authenticated', 'public.agent_oauth_sentinel', 'select') b`)).toEqual([{ a: false, b: false }]);
+  });
+
+  it('a well-keyed refresh token that is not found is a 503 with Retry-After without the sentinel, invalid_grant with it', async () => {
+    const unknown = generateOAuthTokenPair(TEST_PEPPER).refresh;
+    await removeSentinel();
+    const down = await refresh(unknown);
+    expect(down.status).toBe(503);
+    expect(down.headers.get('retry-after')).toBe('5');
+    expect((await json(down)).error).toBe('temporarily_unavailable');
+    await restoreSentinel();
+    const up = await refresh(unknown);
+    expect(up.status).toBe(400);
+    expect((await json(up)).error).toBe('invalid_grant');
+  });
+
+  it('the same for a well-keyed code that is not found', async () => {
+    const unknown = generateAuthorizationCode(TEST_PEPPER);
+    await removeSentinel();
+    const down = await exchange(unknown);
+    expect(down.status).toBe(503);
+    expect(down.headers.get('retry-after')).toBe('5');
+    await restoreSentinel();
+    expect((await json(await exchange(unknown))).error).toBe('invalid_grant');
+  });
+
+  it('a forged value is invalid_grant either way, and a real token still works without the sentinel', async () => {
+    const user = await createUser('sentinel-real');
+    const { pair } = await connect(user);
+    await removeSentinel();
+    expect((await json(await refresh(`spl_ort_${randomBytes(32).toString('base64url')}_AAAAAAAA`))).error).toBe('invalid_grant');
+    expect((await refresh(pair.refresh)).status).toBe(200);
+  });
+});
