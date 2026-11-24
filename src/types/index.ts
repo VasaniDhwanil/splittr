@@ -139,6 +139,7 @@ export interface ScannedReceipt {
   }[];
   subtotal: number;
   tax: number;
+  tip: number;
   total: number;
 }
 

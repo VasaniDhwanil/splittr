@@ -52,6 +52,7 @@ const TIP_SPLIT_HELP: Record<TipSplit, string> = {
   even: 'Everyone chips in the same tip.',
 };
 
+const DEFAULT_TIP_PERCENT = 18;
 const TIP_PERCENTS = [0, 15, 18, 20, 25];
 const TIP_PERCENT_OPTIONS = TIP_PERCENTS.map((pct) => ({ value: String(pct), label: `${pct}%` }));
 
@@ -71,7 +72,7 @@ export default function CreatePage() {
 
   const [items, setItems] = useState<BillItem[]>([]);
   const [tax, setTax] = useState(0);
-  const [tipPercent, setTipPercent] = useState(18);
+  const [tipPercent, setTipPercent] = useState(DEFAULT_TIP_PERCENT);
   const [billName, setBillName] = useState('');
   const [creatorName, setCreatorName] = useState('');
 
@@ -213,6 +214,13 @@ export default function CreatePage() {
 
       setItems(data.items);
       setTax(data.tax || 0);
+      // A tip the bill charged is the exact amount; otherwise back to the default
+      if (data.tip > 0) {
+        setCustomTip(String(data.tip));
+      } else {
+        setCustomTip('');
+        setTipPercent(DEFAULT_TIP_PERCENT);
+      }
       setStep('review');
       toast.success('Receipt scanned successfully!');
     } catch (error) {
