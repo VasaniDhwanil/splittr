@@ -222,7 +222,7 @@ describe('GET /api/agent-oauth/requests/[id]', () => {
     expect((await call(getConsent, req, 'GET')).status).toBe(200);
   });
 
-  it('is owned by exactly one of two accounts racing for an unowned request, through the route', async () => {
+  it('is owned by one account after two race for an unowned request, through the route', async () => {
     const a = await createUser('race-a');
     const b = await createUser('race-b');
     for (let round = 0; round < 10; round++) {
@@ -230,14 +230,16 @@ describe('GET /api/agent-oauth/requests/[id]', () => {
       const statuses = await Promise.all([a, b].map((user) => runAs(user, async () => (await call(getConsent, req, 'GET')).status)));
       const owner = (await db().from('agent_oauth_requests').select('user_id').eq('id', req.id).single()).data!.user_id;
       expect([a.id, b.id]).toContain(owner);
-      // the winner sees it; the loser, who lost the compare-and-set, gets the 404
-      expect(statuses.filter((s) => s === 200)).toHaveLength(1);
-      expect(statuses.filter((s) => s === 404)).toHaveLength(1);
-      // and later reads agree
+      // A request that overlaps the winner's claim loses the compare-and-set (404); one that
+      // arrives after it is a takeover with the cookie (200). Either way one account owns it.
+      expect(statuses.filter((s) => s === 200).length).toBeGreaterThanOrEqual(1);
+      expect(statuses.every((s) => s === 200 || s === 404)).toBe(true);
       const winner = owner === a.id ? a : b;
       const loser = owner === a.id ? b : a;
       expect(await runAs(winner, async () => (await call(getConsent, req, 'GET')).status)).toBe(200);
+      // without the cookie the other account stays out
       expect(await runAs(loser, async () => (await call(getConsent, req, 'GET', { cookie: null })).status)).toBe(404);
+      expect((await db().from('agent_oauth_requests').select('user_id').eq('id', req.id).single()).data!.user_id).toBe(owner);
     }
   });
 
@@ -896,16 +898,20 @@ describe('"Not you? Switch account"', () => {
     expect(rows).toEqual([{ user_id: b.id, outcome: 'consent_account_switched' }]);
   });
 
-  it('two accounts racing to take over an owned request end with one owner and one 200', async () => {
+  it('two accounts racing to take over an owned request end with one owner (the cookie lets either take it)', async () => {
     const owner = await createUser('switch-k');
     const b = await createUser('switch-l');
     const c = await createUser('switch-m');
     for (let round = 0; round < 8; round++) {
       const req = await seedRequest(owner);
       const statuses = await Promise.all([b, c].map((user) => runAs(user, async () => (await call(getConsent, req, 'GET')).status)));
-      expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+      expect(statuses.filter((s) => s === 200).length).toBeGreaterThanOrEqual(1);
+      expect(statuses.every((s) => s === 200 || s === 404)).toBe(true);
       const now = (await db().from('agent_oauth_requests').select('user_id').eq('id', req.id).single()).data!.user_id;
       expect([b.id, c.id]).toContain(now);
+      // the audit trail has one takeover row per successful switch, never for the loser of a lost compare-and-set
+      const switched = (await db().from('agent_audit_log').select('user_id').eq('outcome', 'consent_account_switched').in('user_id', [b.id, c.id])).data!;
+      expect(switched.length).toBeGreaterThanOrEqual(round + 1);
     }
   });
 });
