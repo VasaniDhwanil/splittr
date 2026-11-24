@@ -22,6 +22,7 @@ import { GroupCard } from '@/components/groups/group-card';
 import { EmptyMark } from '@/components/groups/empty-mark';
 import { GroupDialog } from '@/components/groups/group-dialog';
 import { BillRow } from '@/components/groups/bill-row';
+import { ConnectEntryCard } from '@/components/agent/connect-entry-card';
 import { PendingBillRow } from '@/components/agent/pending-bill-row';
 import { splitMineRows } from '@/lib/agent-ui';
 import { SiteNav } from '@/components/landing/site-nav';
@@ -528,6 +529,8 @@ export default function Home() {
                 </div>
               )}
             </section>
+
+            <ConnectEntryCard />
           </div>
         ) : (
           /* Signed-out: the landing */

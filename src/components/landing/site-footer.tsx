@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Wordmark } from './wordmark';
+import { ConnectFooterLink } from './connect-footer-link';
 
 const LINKS = [
   { href: '/signin', label: 'Sign in' },
@@ -20,6 +21,7 @@ export function SiteFooter({ signedIn }: { signedIn: boolean }) {
               {link.label}
             </Link>
           ))}
+          <ConnectFooterLink />
         </nav>
       </div>
     </footer>
